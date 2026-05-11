@@ -158,53 +158,6 @@ function pseudoRandom(seed: number) {
   return x - Math.floor(x);
 }
 
-function smoothstep(t: number) {
-  return t * t * (3 - 2 * t);
-}
-
-function valueNoise3D(x: number, y: number, z: number, seed: number) {
-  const ix = Math.floor(x);
-  const iy = Math.floor(y);
-  const iz = Math.floor(z);
-  const fx = x - ix;
-  const fy = y - iy;
-  const fz = z - iz;
-  const u = smoothstep(fx);
-  const v = smoothstep(fy);
-  const w = smoothstep(fz);
-  const corner = (cx: number, cy: number, cz: number) =>
-    pseudoRandom(seed + cx * 73.7 + cy * 19.3 + cz * 137.1) * 2 - 1;
-  const c000 = corner(ix, iy, iz);
-  const c100 = corner(ix + 1, iy, iz);
-  const c010 = corner(ix, iy + 1, iz);
-  const c110 = corner(ix + 1, iy + 1, iz);
-  const c001 = corner(ix, iy, iz + 1);
-  const c101 = corner(ix + 1, iy, iz + 1);
-  const c011 = corner(ix, iy + 1, iz + 1);
-  const c111 = corner(ix + 1, iy + 1, iz + 1);
-  const x00 = c000 * (1 - u) + c100 * u;
-  const x10 = c010 * (1 - u) + c110 * u;
-  const x01 = c001 * (1 - u) + c101 * u;
-  const x11 = c011 * (1 - u) + c111 * u;
-  const y0 = x00 * (1 - v) + x10 * v;
-  const y1 = x01 * (1 - v) + x11 * v;
-  return y0 * (1 - w) + y1 * w;
-}
-
-function fbm(x: number, y: number, z: number, seed: number, octaves = 4) {
-  let total = 0;
-  let amp = 1;
-  let freq = 1;
-  let max = 0;
-  for (let i = 0; i < octaves; i++) {
-    total += valueNoise3D(x * freq, y * freq, z * freq, seed + i * 31) * amp;
-    max += amp;
-    amp *= 0.5;
-    freq *= 2.1;
-  }
-  return total / max;
-}
-
 type Phenotype = {
   elongation: number;
   taper: number;
@@ -215,7 +168,6 @@ type Phenotype = {
   pistilThickness: number;
   pistilWhiteRatio: number;
   pistilHue: number;
-  pistilCurve: number;
   trichomeCount: number;
   trichomeSize: number;
   trichomeGlow: number;
@@ -254,16 +206,15 @@ function getPhenotype(strain: Strain): Phenotype {
   return {
     elongation: isSativa ? 1.55 + r(1) * 0.3 : isIndica ? 1.18 + r(1) * 0.15 : 1.35 + r(1) * 0.2,
     taper: isSativa ? 0.28 + r(2) * 0.08 : 0.18 + r(2) * 0.08,
-    bumpStrength: 0.85 + r(4) * 0.4,
+    bumpStrength: 0.95 + r(4) * 0.4,
     asymmetry: 0.08 + r(5) * 0.12,
     pistilCount: Math.floor(70 + r(6) * 50),
-    pistilLength: 0.25 + r(7) * 0.22,
-    pistilThickness: 0.004 + r(8) * 0.003,
-    pistilWhiteRatio: isOrange ? 0.05 + r(9) * 0.12 : 0.18 + r(9) * 0.3,
+    pistilLength: 0.22 + r(7) * 0.2,
+    pistilThickness: 0.006 + r(8) * 0.003,
+    pistilWhiteRatio: isOrange ? 0.05 + r(9) * 0.1 : 0.15 + r(9) * 0.2,
     pistilHue: 0.045 + r(10) * 0.05,
-    pistilCurve: 0.3 + r(11) * 0.4,
-    trichomeCount: isWhite ? Math.floor(450 + r(12) * 150) : Math.floor(320 + r(12) * 180),
-    trichomeSize: 0.011 + r(13) * 0.007,
+    trichomeCount: isWhite ? Math.floor(360 + r(12) * 140) : Math.floor(260 + r(12) * 140),
+    trichomeSize: 0.012 + r(13) * 0.006,
     trichomeGlow: isWhite ? 0.7 + r(14) * 0.3 : 0.5 + r(14) * 0.3,
     baseGreen,
     bumpHighlight,
@@ -278,6 +229,7 @@ function getPhenotype(strain: Strain): Phenotype {
   };
 }
 
+// Surface point with same noise as bud body — used to place pistils/trichomes ON the bumpy surface
 function budSurfacePoint(
   theta: number,
   phi: number,
@@ -295,17 +247,22 @@ function budSurfacePoint(
   const lean = Math.sin(yNorm * 1.5 + pheno.seed) * pheno.asymmetry;
   x += lean * Math.cos(pheno.seed);
   z += lean * Math.sin(pheno.seed);
-  const noise =
-    fbm(x * 1.3, y * 0.9, z * 1.3, pheno.seed, 3) * 0.13 +
-    fbm(x * 3.5, y * 2.5, z * 3.5, pheno.seed + 100, 3) * 0.06;
+  const angle = Math.atan2(z, x);
+  // Same multi-layer noise pattern as bud body (inline, no recursion)
+  const big1 = Math.sin(angle * 2.7 + y * 1.8 + pheno.seed) * 0.13;
+  const big2 = Math.cos(angle * 3.4 - y * 2.2 + pheno.seed * 2) * 0.10;
+  const med1 = Math.sin(angle * 6.8 + y * 4.3 + pheno.seed * 3) * 0.06;
+  const med2 = Math.cos(angle * 8.1 - y * 5.7 + pheno.seed * 5) * 0.05;
+  const totalBump = (big1 + big2 + med1 + med2) * pheno.bumpStrength;
   const dist = Math.sqrt(x * x + y * y + z * z);
-  const newDist = (dist + noise * pheno.bumpStrength) * radialMultiplier;
+  const newDist = (dist + totalBump) * radialMultiplier;
   const scale = newDist / dist;
   return [x * scale, y * scale, z * scale];
 }
 
+// MAIN BUD BODY GEOMETRY — Multi-layer Math.sin/cos noise (NO recursion, NO FBM)
 function buildBudGeometry(pheno: Phenotype): THREE.BufferGeometry {
-  const geo = new THREE.IcosahedronGeometry(1, 6); // detail 6 for stability
+  const geo = new THREE.IcosahedronGeometry(1, 5); // 642 verts, stable
   const positions = geo.attributes.position;
   const colors: number[] = [];
   const purpleColor = new THREE.Color("#3a1f48");
@@ -325,10 +282,15 @@ function buildBudGeometry(pheno: Phenotype): THREE.BufferGeometry {
     x += lean * Math.cos(pheno.seed);
     z += lean * Math.sin(pheno.seed);
 
-    const big = fbm(x * 1.3, y * 0.9, z * 1.3, pheno.seed, 3) * 0.14;
-    const med = fbm(x * 3.5, y * 2.5, z * 3.5, pheno.seed + 100, 3) * 0.07;
-    const fine = fbm(x * 9, y * 7, z * 9, pheno.seed + 200, 2) * 0.025;
-    const totalBump = (big + med + fine) * pheno.bumpStrength;
+    const angle = Math.atan2(z, x);
+    // Multi-layer noise (inline, non-recursive — STABLE)
+    const big1 = Math.sin(angle * 2.7 + y * 1.8 + pheno.seed) * 0.13;
+    const big2 = Math.cos(angle * 3.4 - y * 2.2 + pheno.seed * 2) * 0.10;
+    const med1 = Math.sin(angle * 6.8 + y * 4.3 + pheno.seed * 3) * 0.06;
+    const med2 = Math.cos(angle * 8.1 - y * 5.7 + pheno.seed * 5) * 0.05;
+    const fine = Math.sin(angle * 15 + y * 11 + pheno.seed * 7) * 0.018;
+    const jitter = (pseudoRandom(i * 12.9898 + pheno.seed) - 0.5) * 0.025;
+    const totalBump = (big1 + big2 + med1 + med2 + fine + jitter) * pheno.bumpStrength;
 
     const dist = Math.sqrt(x * x + y * y + z * z);
     const scale = (dist + totalBump) / dist;
@@ -336,26 +298,31 @@ function buildBudGeometry(pheno: Phenotype): THREE.BufferGeometry {
     positions.setY(i, y * scale);
     positions.setZ(i, z * scale);
 
-    const variation = pseudoRandom(i * 3.456 + pheno.seed);
+    // Vertex colors with smooth transitions
     const c = pheno.baseGreen.clone();
-    if (totalBump < -0.02) {
-      const darkAmount = Math.min(1, (-totalBump - 0.02) * 7);
-      c.lerp(pheno.darkCrevice, darkAmount * 0.7);
+    const variation = pseudoRandom(i * 3.456 + pheno.seed);
+
+    // Darken crevices
+    if (totalBump < -0.015) {
+      const darkAmt = Math.min(1, (-totalBump - 0.015) * 8);
+      c.lerp(pheno.darkCrevice, darkAmt * 0.7);
     }
-    if (totalBump > 0.03) {
-      const liftAmount = Math.min(1, (totalBump - 0.03) * 6);
-      c.lerp(pheno.bumpHighlight, liftAmount * 0.45);
+    // Highlight bulges
+    if (totalBump > 0.025) {
+      const liftAmt = Math.min(1, (totalBump - 0.025) * 7);
+      c.lerp(pheno.bumpHighlight, liftAmt * 0.5);
     }
+    // Purple variation (more on exposed bumps)
     if (pheno.purpleHint > 0) {
-      const purpleAmt = pheno.purpleHint * (0.35 + variation * 0.65);
-      const purpleBoost = totalBump > 0.02 ? 1.3 : 0.8;
-      c.lerp(purpleColor, purpleAmt * 0.55 * purpleBoost);
+      const purpleAmt = pheno.purpleHint * (0.3 + variation * 0.7);
+      const heightBoost = totalBump > 0.02 ? 1.2 : 0.7;
+      c.lerp(purpleColor, purpleAmt * 0.55 * heightBoost);
     }
     if (pheno.yellowHint > 0) {
-      c.lerp(yellowGreen, pheno.yellowHint * 0.45 * variation);
+      c.lerp(yellowGreen, pheno.yellowHint * 0.4 * variation);
     }
     if (pheno.whiteHint > 0) {
-      c.lerp(whiteish, pheno.whiteHint * 0.3);
+      c.lerp(whiteish, pheno.whiteHint * 0.25);
     }
     const lightness = 0.85 + pseudoRandom(i * 7.89 + pheno.seed) * 0.3;
     c.multiplyScalar(lightness);
@@ -365,36 +332,6 @@ function buildBudGeometry(pheno: Phenotype): THREE.BufferGeometry {
   geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geo.computeVertexNormals();
   return geo;
-}
-
-function buildCurvedPistilGeometry(
-  surfacePos: [number, number, number],
-  outDirection: THREE.Vector3,
-  length: number,
-  thickness: number,
-  curveAmount: number,
-  seed: number
-): THREE.BufferGeometry {
-  const start = new THREE.Vector3(...surfacePos);
-  const tempSide = new THREE.Vector3(
-    pseudoRandom(seed * 7) - 0.5,
-    pseudoRandom(seed * 11) - 0.5,
-    pseudoRandom(seed * 13) - 0.5
-  );
-  const side = new THREE.Vector3().crossVectors(outDirection, tempSide).normalize();
-  const upBias = 0.25 + pseudoRandom(seed * 17) * 0.2;
-  const p0 = start;
-  const p1 = start.clone().add(outDirection.clone().multiplyScalar(length * 0.3));
-  const p2 = start.clone()
-    .add(outDirection.clone().multiplyScalar(length * 0.6))
-    .add(side.clone().multiplyScalar(curveAmount * length * 0.25))
-    .add(new THREE.Vector3(0, length * 0.08, 0));
-  const p3 = start.clone()
-    .add(outDirection.clone().multiplyScalar(length * 0.92))
-    .add(side.clone().multiplyScalar(curveAmount * length * 0.5))
-    .add(new THREE.Vector3(0, length * upBias, 0));
-  const curve = new THREE.CatmullRomCurve3([p0, p1, p2, p3]);
-  return new THREE.TubeGeometry(curve, 8, thickness, 5, false);
 }
 
 function makeSugarLeafShape(): THREE.Shape {
@@ -428,6 +365,13 @@ function rotationFromDir(dir: THREE.Vector3): [number, number, number] {
   return [e.x, e.y, e.z];
 }
 
+type InstanceData = {
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+  color?: THREE.Color;
+};
+
 function Bud({ strain }: { strain: Strain }) {
   const groupRef = useRef<THREE.Group>(null);
 
@@ -435,144 +379,214 @@ function Bud({ strain }: { strain: Strain }) {
     const pheno = getPhenotype(strain);
     const bodyGeometry = buildBudGeometry(pheno);
 
-    const pistils: Array<{ geometry: THREE.BufferGeometry; color: THREE.Color }> = [];
+    // PISTILS — Cone instances with per-instance color and tilt variation
+    const pistils: InstanceData[] = [];
     for (let i = 0; i < pheno.pistilCount; i++) {
       const s = pheno.seed + i * 7.89;
       const theta = pseudoRandom(s) * Math.PI * 2;
       const phi = Math.acos(2 * (pseudoRandom(s + 1) * 0.72 + 0.05) - 0.15);
-      const surfacePos = budSurfacePoint(theta, phi, pheno, 0.97);
+      const surfacePos = budSurfacePoint(theta, phi, pheno, 0.99);
+      const surfVec = new THREE.Vector3(...surfacePos);
+      // Outward direction biased slightly upward (real pistils curl up)
       const outDir = new THREE.Vector3(
-        surfacePos[0],
-        surfacePos[1] + 0.15,
-        surfacePos[2]
+        surfVec.x,
+        surfVec.y + 0.2,
+        surfVec.z
       ).normalize();
-      const length = pheno.pistilLength * (0.65 + pseudoRandom(s + 2) * 0.7);
-      const thickness = pheno.pistilThickness * (0.7 + pseudoRandom(s + 3) * 0.6);
-      const curve = pheno.pistilCurve * (0.5 + pseudoRandom(s + 4) * 1);
-      const geometry = buildCurvedPistilGeometry(surfacePos, outDir, length, thickness, curve, s);
-      const t = pseudoRandom(s + 5);
+      // Add slight random tilt for varied "hair" look
+      const tiltAngle = (pseudoRandom(s + 2) - 0.5) * 0.6;
+      const tiltAxis = new THREE.Vector3(
+        pseudoRandom(s + 3) - 0.5,
+        0,
+        pseudoRandom(s + 4) - 0.5
+      ).normalize();
+      const tiltQ = new THREE.Quaternion().setFromAxisAngle(tiltAxis, tiltAngle);
+      const tiltedDir = outDir.clone().applyQuaternion(tiltQ);
+
+      const length = pheno.pistilLength * (0.6 + pseudoRandom(s + 5) * 0.8);
+      const thickness = pheno.pistilThickness * (0.7 + pseudoRandom(s + 6) * 0.6);
+      // Position cone center at surface + (length/2) * direction
+      const cx = surfVec.x + tiltedDir.x * length * 0.5;
+      const cy = surfVec.y + tiltedDir.y * length * 0.5;
+      const cz = surfVec.z + tiltedDir.z * length * 0.5;
+
+      // Color: white tip / light orange / dark orange / red — gradient
+      const t = pseudoRandom(s + 7);
       let color: THREE.Color;
       if (t < pheno.pistilWhiteRatio) {
-        color = new THREE.Color().setHSL(0.14, 0.18, 0.88);
+        color = new THREE.Color().setHSL(0.13, 0.15, 0.85);
+      } else if (t < pheno.pistilWhiteRatio + 0.45) {
+        // Light orange
+        const hue = pheno.pistilHue + 0.015 + (pseudoRandom(s + 8) - 0.5) * 0.02;
+        color = new THREE.Color().setHSL(hue, 0.75, 0.55);
+      } else if (t < pheno.pistilWhiteRatio + 0.85) {
+        // Medium orange
+        const hue = pheno.pistilHue + (pseudoRandom(s + 9) - 0.5) * 0.025;
+        color = new THREE.Color().setHSL(hue, 0.82, 0.45);
       } else {
-        const hue = pheno.pistilHue + (pseudoRandom(s + 6) - 0.5) * 0.04;
-        const sat = 0.7 + pseudoRandom(s + 7) * 0.22;
-        const lig = 0.4 + pseudoRandom(s + 8) * 0.2;
-        color = new THREE.Color().setHSL(hue, sat, lig);
+        // Dark red/brown
+        const hue = pheno.pistilHue - 0.015 + (pseudoRandom(s + 10) - 0.5) * 0.02;
+        color = new THREE.Color().setHSL(hue, 0.85, 0.32);
       }
-      pistils.push({ geometry, color });
+
+      pistils.push({
+        position: [cx, cy, cz],
+        rotation: rotationFromDir(tiltedDir),
+        scale: [thickness, length, thickness],
+        color,
+      });
     }
 
-    const trichomes: Array<{ position: [number, number, number]; rotation: [number, number, number]; size: number }> = [];
+    // TRICHOMES — Two-layer "mushroom" style: cone stalk + sphere head, both instanced
+    const trichomeStalks: InstanceData[] = [];
+    const trichomeHeads: InstanceData[] = [];
     for (let i = 0; i < pheno.trichomeCount; i++) {
       const s = pheno.seed + i * 2.7183;
       const theta = pseudoRandom(s) * Math.PI * 2;
       const phi = Math.acos(2 * pseudoRandom(s + 1) - 1);
-      const pos = budSurfacePoint(theta, phi, pheno, 1.015 + pseudoRandom(s + 2) * 0.02);
-      const outDir = new THREE.Vector3(pos[0], pos[1], pos[2]).normalize();
-      const size = pheno.trichomeSize * (0.55 + pseudoRandom(s + 3) * 0.9);
-      const sx = pos[0] + outDir.x * size * 1.2;
-      const sy = pos[1] + outDir.y * size * 1.2;
-      const sz = pos[2] + outDir.z * size * 1.2;
-      trichomes.push({ position: [sx, sy, sz], rotation: rotationFromDir(outDir), size });
+      const surfacePos = budSurfacePoint(theta, phi, pheno, 1.0);
+      const surfVec = new THREE.Vector3(...surfacePos);
+      const outDir = surfVec.clone().normalize();
+
+      const stalkLength = pheno.trichomeSize * (1.3 + pseudoRandom(s + 2) * 0.6);
+      const stalkThickness = pheno.trichomeSize * 0.35;
+      const headSize = pheno.trichomeSize * (0.65 + pseudoRandom(s + 3) * 0.4);
+
+      // Stalk: position at surface + (stalkLength/2) * outDir
+      const stalkPos: [number, number, number] = [
+        surfVec.x + outDir.x * stalkLength * 0.5,
+        surfVec.y + outDir.y * stalkLength * 0.5,
+        surfVec.z + outDir.z * stalkLength * 0.5,
+      ];
+      trichomeStalks.push({
+        position: stalkPos,
+        rotation: rotationFromDir(outDir),
+        scale: [stalkThickness, stalkLength, stalkThickness],
+      });
+
+      // Head: position at end of stalk + headSize for proper resting
+      const headPos: [number, number, number] = [
+        surfVec.x + outDir.x * (stalkLength + headSize * 0.6),
+        surfVec.y + outDir.y * (stalkLength + headSize * 0.6),
+        surfVec.z + outDir.z * (stalkLength + headSize * 0.6),
+      ];
+      trichomeHeads.push({
+        position: headPos,
+        rotation: [0, 0, 0],
+        scale: [headSize, headSize, headSize],
+      });
     }
 
+    // SUGAR LEAVES
     const leaves: Array<{ position: [number, number, number]; rotation: [number, number, number]; scale: number }> = [];
     for (let i = 0; i < pheno.sugarLeafCount; i++) {
-      const s = pheno.seed + i * 13.7;
-      const theta = pseudoRandom(s) * Math.PI * 2;
-      const phi = Math.acos(2 * (pseudoRandom(s + 1) * 0.65 + 0.12) - 0.2);
+      const sl = pheno.seed + i * 13.7;
+      const theta = pseudoRandom(sl) * Math.PI * 2;
+      const phi = Math.acos(2 * (pseudoRandom(sl + 1) * 0.65 + 0.12) - 0.2);
       const pos = budSurfacePoint(theta, phi, pheno, 1.0);
       const outDir = new THREE.Vector3(pos[0], pos[1] + 0.15, pos[2]).normalize();
-      const scl = 0.2 + pseudoRandom(s + 2) * 0.12;
+      const scl = 0.2 + pseudoRandom(sl + 2) * 0.12;
       const offset = 0.03;
       const baseRot = rotationFromDir(outDir);
-      const spinZ = pseudoRandom(s + 3) * Math.PI * 2;
+      const spinZ = pseudoRandom(sl + 3) * Math.PI * 2;
       leaves.push({
-        position: [pos[0] + outDir.x * offset, pos[1] + outDir.y * offset, pos[2] + outDir.z * offset],
+        position: [
+          pos[0] + outDir.x * offset,
+          pos[1] + outDir.y * offset,
+          pos[2] + outDir.z * offset,
+        ],
         rotation: [baseRot[0], baseRot[1], spinZ],
         scale: scl,
       });
     }
 
-    const branches: Array<{ origin: [number, number, number]; rotation: [number, number, number]; length: number; hasMiniBud: boolean; miniBudGeometry?: THREE.BufferGeometry }> = [];
+    // BRANCHES with simple mini-buds (deformed sphere — NOT custom geometry)
+    const branches: Array<{
+      origin: [number, number, number];
+      rotation: [number, number, number];
+      length: number;
+      hasMiniBud: boolean;
+      miniBudPos?: [number, number, number];
+      miniBudScale?: [number, number, number];
+    }> = [];
     if (pheno.hasBranches) {
       for (let i = 0; i < pheno.branchCount; i++) {
-        const s = pheno.seed + i * 23.4;
-        const theta = pseudoRandom(s) * Math.PI * 2;
-        const yPos = -0.45 - pseudoRandom(s + 1) * 0.3;
+        const sb = pheno.seed + i * 23.4;
+        const theta = pseudoRandom(sb) * Math.PI * 2;
+        const yPos = -0.45 - pseudoRandom(sb + 1) * 0.3;
         const yNorm = yPos / pheno.elongation;
         const taperFactor = yNorm > 0 ? 1 - yNorm * pheno.taper : 1 + Math.abs(yNorm) * 0.06;
         const r = 0.85 * taperFactor;
-        const origin: [number, number, number] = [Math.cos(theta) * r, yPos, Math.sin(theta) * r];
-        const outDir = new THREE.Vector3(Math.cos(theta) * 1.5, -0.2 + pseudoRandom(s + 2) * 0.5, Math.sin(theta) * 1.5).normalize();
-        const length = 0.3 + pseudoRandom(s + 3) * 0.3;
-        const hasMiniBud = pseudoRandom(s + 4) > 0.25;
-        let miniBudGeometry: THREE.BufferGeometry | undefined;
+        const origin: [number, number, number] = [
+          Math.cos(theta) * r,
+          yPos,
+          Math.sin(theta) * r,
+        ];
+        const outDir = new THREE.Vector3(
+          Math.cos(theta) * 1.5,
+          -0.2 + pseudoRandom(sb + 2) * 0.5,
+          Math.sin(theta) * 1.5
+        ).normalize();
+        const length = 0.3 + pseudoRandom(sb + 3) * 0.3;
+        const hasMiniBud = pseudoRandom(sb + 4) > 0.25;
+
+        let miniBudPos: [number, number, number] | undefined;
+        let miniBudScale: [number, number, number] | undefined;
         if (hasMiniBud) {
-          const mGeo = new THREE.IcosahedronGeometry(0.2, 3);
-          const mp = mGeo.attributes.position;
-          for (let j = 0; j < mp.count; j++) {
-            const mx = mp.getX(j);
-            const my = mp.getY(j);
-            const mz = mp.getZ(j);
-            const n = fbm(mx * 4, my * 4, mz * 4, s + j * 0.13, 2) * 0.04;
-            const md = Math.sqrt(mx * mx + my * my + mz * mz);
-            const sc = (md + n) / md;
-            mp.setX(j, mx * sc);
-            mp.setY(j, my * 1.3 * sc);
-            mp.setZ(j, mz * sc);
-          }
-          mGeo.computeVertexNormals();
-          miniBudGeometry = mGeo;
+          miniBudPos = [0, length + 0.15, 0];
+          const ms = 0.18 + pseudoRandom(sb + 5) * 0.08;
+          miniBudScale = [ms, ms * 1.3, ms];
         }
-        branches.push({ origin, rotation: rotationFromDir(outDir), length, hasMiniBud, miniBudGeometry });
+
+        branches.push({
+          origin,
+          rotation: rotationFromDir(outDir),
+          length,
+          hasMiniBud,
+          miniBudPos,
+          miniBudScale,
+        });
       }
     }
 
-    return { pheno, bodyGeometry, pistils, trichomes, leaves, branches };
+    return { pheno, bodyGeometry, pistils, trichomeStalks, trichomeHeads, leaves, branches };
   }, [strain]);
 
   const sugarLeafShape = useMemo(() => makeSugarLeafShape(), []);
 
-  useEffect(() => {
-    return () => {
-      data.bodyGeometry.dispose();
-      data.pistils.forEach((p) => p.geometry.dispose());
-      data.branches.forEach((b) => b.miniBudGeometry?.dispose());
-    };
-  }, [data]);
-
   useFrame((_, delta) => {
     if (groupRef.current) {
-      groupRef.current.rotation.y += delta * 0.12;
+      groupRef.current.rotation.y += delta * 0.14;
     }
   });
 
+  const stemColor = "#5a4225";
+
   return (
     <group ref={groupRef} position={[0, 0.1, 0]}>
-      {/* Stem */}
+      {/* STEM */}
       <mesh position={[0, -data.pheno.elongation - 0.28, 0]}>
         <cylinderGeometry args={[0.05, 0.065, 0.5, 12]} />
-        <meshStandardMaterial color="#5a4225" roughness={0.88} metalness={0.05} />
+        <meshStandardMaterial color={stemColor} roughness={0.88} metalness={0.05} />
       </mesh>
       <mesh position={[0, -data.pheno.elongation, 0]}>
         <sphereGeometry args={[0.08, 14, 10]} />
         <meshStandardMaterial color="#7b5e35" roughness={0.8} />
       </mesh>
 
-      {/* Side branches */}
+      {/* SIDE BRANCHES */}
       {data.branches.map((b, i) => (
         <group key={`br-${i}`} position={b.origin} rotation={b.rotation}>
           <mesh position={[0, b.length / 2, 0]}>
             <cylinderGeometry args={[0.014, 0.025, b.length, 8]} />
-            <meshStandardMaterial color="#5a4225" roughness={0.88} />
+            <meshStandardMaterial color={stemColor} roughness={0.88} />
           </mesh>
-          {b.hasMiniBud && b.miniBudGeometry && (
-            <mesh position={[0, b.length + 0.15, 0]} geometry={b.miniBudGeometry}>
+          {b.hasMiniBud && b.miniBudPos && b.miniBudScale && (
+            <mesh position={b.miniBudPos} scale={b.miniBudScale}>
+              <sphereGeometry args={[1, 16, 12]} />
               <meshStandardMaterial
-                color={data.pheno.baseGreen.clone().multiplyScalar(0.92)}
-                roughness={0.6}
+                color={data.pheno.baseGreen.clone().multiplyScalar(0.85)}
+                roughness={0.65}
                 metalness={0.02}
               />
             </mesh>
@@ -580,7 +594,7 @@ function Bud({ strain }: { strain: Strain }) {
         </group>
       ))}
 
-      {/* Main bud body */}
+      {/* MAIN BUD BODY */}
       <mesh geometry={data.bodyGeometry}>
         <meshStandardMaterial
           vertexColors
@@ -589,7 +603,7 @@ function Bud({ strain }: { strain: Strain }) {
         />
       </mesh>
 
-      {/* Sugar leaves */}
+      {/* SUGAR LEAVES */}
       {data.leaves.map((l, i) => (
         <mesh
           key={`leaf-${i}`}
@@ -607,35 +621,57 @@ function Bud({ strain }: { strain: Strain }) {
         </mesh>
       ))}
 
-      {/* Curved pistils */}
-      {data.pistils.map((p, i) => (
-        <mesh key={`p-${i}`} geometry={p.geometry}>
-          <meshStandardMaterial
+      {/* PISTILS — Cone instances with per-instance color */}
+      <Instances limit={150} range={data.pistils.length}>
+        <coneGeometry args={[1, 1, 6]} />
+        <meshStandardMaterial roughness={0.65} metalness={0.0} vertexColors={false} />
+        {data.pistils.map((p, i) => (
+          <Instance
+            key={i}
+            position={p.position}
+            rotation={p.rotation}
+            scale={p.scale}
             color={p.color}
-            roughness={0.7}
-            metalness={0.0}
-            emissive={p.color}
-            emissiveIntensity={0.05}
           />
-        </mesh>
-      ))}
+        ))}
+      </Instances>
 
-      {/* Trichomes — bright metallic capsules */}
-      <Instances limit={700} range={data.trichomes.length}>
-        <capsuleGeometry args={[1, 1.4, 4, 6]} />
+      {/* TRICHOME STALKS — small matte cones */}
+      <Instances limit={550} range={data.trichomeStalks.length}>
+        <coneGeometry args={[1, 1, 5]} />
         <meshStandardMaterial
-          color="#fff8e0"
+          color="#e8e0c0"
+          roughness={0.45}
+          metalness={0.15}
           emissive="#fff4c0"
-          emissiveIntensity={data.pheno.trichomeGlow}
-          roughness={0.08}
-          metalness={0.7}
+          emissiveIntensity={0.15}
         />
-        {data.trichomes.map((t, i) => (
+        {data.trichomeStalks.map((t, i) => (
           <Instance
             key={i}
             position={t.position}
             rotation={t.rotation}
-            scale={[t.size, t.size * 1.5, t.size]}
+            scale={t.scale}
+          />
+        ))}
+      </Instances>
+
+      {/* TRICHOME HEADS — glassy reflective spheres */}
+      <Instances limit={550} range={data.trichomeHeads.length}>
+        <sphereGeometry args={[1, 8, 6]} />
+        <meshStandardMaterial
+          color="#fff8e0"
+          roughness={0.05}
+          metalness={0.75}
+          emissive="#fff8c0"
+          emissiveIntensity={data.pheno.trichomeGlow}
+        />
+        {data.trichomeHeads.map((t, i) => (
+          <Instance
+            key={i}
+            position={t.position}
+            rotation={t.rotation}
+            scale={t.scale}
           />
         ))}
       </Instances>
@@ -656,12 +692,12 @@ function BudViewer({ strain }: { strain: Strain }) {
         <directionalLight position={[-5, 3, -3]} intensity={0.7} color="#a8c4ff" />
         <directionalLight position={[0, -2, 4]} intensity={0.4} color="#ffd9a8" />
         <pointLight position={[3, 4, 2]} intensity={0.5} color="#ffffff" distance={12} />
-        <ambientLight intensity={0.25} />
+        <ambientLight intensity={0.3} />
         <Float speed={1.2} rotationIntensity={0.25} floatIntensity={0.2}>
           <Bud strain={strain} />
         </Float>
         <ContactShadows
-          position={[0, -1.85, 0]}
+          position={[0, -2.0, 0]}
           opacity={0.55}
           blur={2.8}
           far={3}
@@ -728,12 +764,10 @@ export default function Home() {
           font-family: var(--sans); background: var(--cream); color: var(--ink);
           font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased;
           background-image: radial-gradient(at 12% 18%, rgba(139, 69, 19, 0.04) 0px, transparent 50%), radial-gradient(at 88% 72%, rgba(31, 53, 32, 0.05) 0px, transparent 50%);
-          min-height: 100vh;
-          overflow-x: hidden;
+          min-height: 100vh; overflow-x: hidden;
         }
         .container { max-width: 1240px; margin: 0 auto; padding: 0 32px; position: relative; z-index: 2; }
 
-        /* HEADER */
         header { padding: 28px 0; border-bottom: 1px solid var(--line); position: relative; z-index: 10; }
         .header-inner { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
         .brand { display: flex; align-items: baseline; gap: 10px; }
@@ -745,7 +779,6 @@ export default function Home() {
         nav a:hover { color: var(--forest); }
         .header-meta { font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-mute); }
 
-        /* HERO */
         .hero { padding: 96px 0 80px; position: relative; }
         .hero-eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--copper); margin-bottom: 32px; display: flex; align-items: center; gap: 16px; }
         .hero-eyebrow::before { content: ''; width: 32px; height: 1px; background: var(--copper); }
@@ -755,7 +788,6 @@ export default function Home() {
         .hero-meta-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-mute); }
         .hero-meta-value { font-family: var(--display); font-size: 22px; font-style: italic; }
 
-        /* FILTER */
         .filter-section { padding: 24px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--paper); position: sticky; top: 0; z-index: 50; backdrop-filter: blur(8px); }
         .filter-row { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; }
         .search-wrap { flex: 1; position: relative; }
@@ -772,7 +804,6 @@ export default function Home() {
         .results-count { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; color: var(--ink-mute); text-transform: uppercase; white-space: nowrap; }
         .results-count strong { font-weight: 500; color: var(--ink); }
 
-        /* STRAINS */
         .strains-section { padding: 64px 0 120px; }
         .empty-state { text-align: center; padding: 80px 20px; font-family: var(--display); font-style: italic; font-size: 24px; color: var(--ink-mute); }
         .strain-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px 24px; }
@@ -793,7 +824,6 @@ export default function Home() {
         .terpene-name { font-size: 13px; color: var(--ink-soft); font-weight: 500; }
         .terpene-icon { width: 6px; height: 6px; border-radius: 50%; background: var(--copper); }
 
-        /* MODAL */
         .modal-overlay { position: fixed; inset: 0; background: rgba(26, 26, 24, 0.75); backdrop-filter: blur(8px); z-index: 100; display: flex; align-items: flex-start; justify-content: center; padding: 40px 20px; overflow-y: auto; animation: fadeIn 0.3s ease; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .modal { background: var(--paper); max-width: 900px; width: 100%; border-radius: 4px; overflow: hidden; position: relative; animation: slideUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
@@ -827,13 +857,11 @@ export default function Home() {
         .effects-tags { display: flex; flex-wrap: wrap; gap: 10px; }
         .effect-tag { padding: 8px 16px; background: var(--cream); border: 1px solid var(--line); border-radius: 100px; font-size: 13px; color: var(--ink-soft); font-weight: 500; }
 
-        /* FOOTER */
         footer { background: var(--ink); color: var(--cream); padding: 80px 0 32px; position: relative; z-index: 2; }
         .disclaimer { background: rgba(139, 69, 19, 0.12); border: 1px solid rgba(139, 69, 19, 0.25); padding: 20px 24px; border-radius: 4px; margin-bottom: 48px; font-size: 13px; line-height: 1.6; color: rgba(244, 239, 229, 0.85); }
         .disclaimer strong { color: var(--copper); display: block; margin-bottom: 4px; letter-spacing: 0.05em; font-size: 11px; text-transform: uppercase; font-family: var(--mono); }
         .footer-bottom { padding-top: 32px; border-top: 1px solid rgba(244, 239, 229, 0.1); display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: rgba(244, 239, 229, 0.5); flex-wrap: wrap; gap: 16px; letter-spacing: 0.05em; }
 
-        /* =========== TABLET =========== */
         @media (max-width: 900px) {
           .container { padding: 0 24px; }
           .strain-grid { grid-template-columns: repeat(2, 1fr); gap: 24px 20px; }
@@ -846,11 +874,8 @@ export default function Home() {
           .modal-body { padding: 36px 32px; }
         }
 
-        /* =========== MOBILE =========== */
         @media (max-width: 600px) {
           .container { padding: 0 16px; }
-
-          /* Header → vertikal, kompakt */
           header { padding: 16px 0; }
           .header-inner { flex-direction: column; align-items: flex-start; gap: 12px; }
           .brand { gap: 8px; }
@@ -859,8 +884,6 @@ export default function Home() {
           nav { width: 100%; }
           nav ul { gap: 16px; flex-wrap: wrap; }
           nav a { font-size: 12px; }
-
-          /* Hero — kleiner, weniger padding */
           .hero { padding: 40px 0 32px; }
           .hero-eyebrow { font-size: 10px; margin-bottom: 20px; gap: 12px; }
           .hero-eyebrow::before { width: 20px; }
@@ -869,8 +892,6 @@ export default function Home() {
           .hero-meta > div { flex: 1; min-width: 100px; }
           .hero-meta-value { font-size: 18px; }
           .hero-meta-label { font-size: 9px; }
-
-          /* Filter section */
           .filter-section { padding: 16px 0; }
           .filter-row { margin-bottom: 12px; }
           .search-input { font-size: 14px; padding: 10px 14px 10px 38px; }
@@ -878,15 +899,11 @@ export default function Home() {
           .filter-group { gap: 8px; }
           .filter-pill { padding: 6px 12px; font-size: 12px; }
           .filter-label { display: none; }
-
-          /* Strain grid 1 col */
           .strains-section { padding: 32px 0 64px; }
           .strain-grid { grid-template-columns: 1fr; gap: 20px; }
           .strain-card-visual { height: 180px; }
           .strain-card-body { padding: 20px 20px 24px; }
           .strain-card-name { font-size: 22px; }
-
-          /* Modal vollformatig */
           .modal-overlay { padding: 0; align-items: stretch; }
           .modal { max-width: 100%; border-radius: 0; min-height: 100vh; }
           .modal-close { top: 16px; right: 16px; width: 36px; height: 36px; font-size: 18px; }
@@ -902,15 +919,11 @@ export default function Home() {
           .modal-stats-grid { grid-template-columns: 1fr; gap: 12px; }
           .modal-stat { padding: 16px; }
           .modal-stat-value { font-size: 26px; }
-
-          /* Terpen-Zeile gestapelt */
           .terpene-row { grid-template-columns: 1fr; gap: 6px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
           .terpene-row:last-child { border-bottom: none; }
           .terpene-row-value { text-align: left; }
           .terpene-bar { width: 100%; }
           .effect-tag { font-size: 12px; padding: 6px 12px; }
-
-          /* Footer */
           footer { padding: 48px 0 24px; }
           .disclaimer { padding: 16px; font-size: 12px; margin-bottom: 28px; }
           .footer-bottom { font-size: 10px; }
