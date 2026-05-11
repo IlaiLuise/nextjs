@@ -151,22 +151,17 @@ const strains: Strain[] = [
     effects: ["klar", "ruhig", "fokussiert", "schmerzlindernd"] },
 ];
 
-// =================================================================
-// 3D BUD — high-resolution procedural cannabis bud with FBM noise,
-// curved pistils, glass-like trichomes and per-strain variation
-// =================================================================
+// ===================== 3D BUD =====================
 
 function pseudoRandom(seed: number) {
   const x = Math.sin(seed) * 10000;
   return x - Math.floor(x);
 }
 
-// Smooth interpolation
 function smoothstep(t: number) {
   return t * t * (3 - 2 * t);
 }
 
-// Value noise (smooth interpolated random)
 function valueNoise3D(x: number, y: number, z: number, seed: number) {
   const ix = Math.floor(x);
   const iy = Math.floor(y);
@@ -174,14 +169,11 @@ function valueNoise3D(x: number, y: number, z: number, seed: number) {
   const fx = x - ix;
   const fy = y - iy;
   const fz = z - iz;
-
   const u = smoothstep(fx);
   const v = smoothstep(fy);
   const w = smoothstep(fz);
-
   const corner = (cx: number, cy: number, cz: number) =>
     pseudoRandom(seed + cx * 73.7 + cy * 19.3 + cz * 137.1) * 2 - 1;
-
   const c000 = corner(ix, iy, iz);
   const c100 = corner(ix + 1, iy, iz);
   const c010 = corner(ix, iy + 1, iz);
@@ -190,19 +182,15 @@ function valueNoise3D(x: number, y: number, z: number, seed: number) {
   const c101 = corner(ix + 1, iy, iz + 1);
   const c011 = corner(ix, iy + 1, iz + 1);
   const c111 = corner(ix + 1, iy + 1, iz + 1);
-
   const x00 = c000 * (1 - u) + c100 * u;
   const x10 = c010 * (1 - u) + c110 * u;
   const x01 = c001 * (1 - u) + c101 * u;
   const x11 = c011 * (1 - u) + c111 * u;
-
   const y0 = x00 * (1 - v) + x10 * v;
   const y1 = x01 * (1 - v) + x11 * v;
-
   return y0 * (1 - w) + y1 * w;
 }
 
-// Fractal Brownian Motion: layered noise for organic detail
 function fbm(x: number, y: number, z: number, seed: number, octaves = 4) {
   let total = 0;
   let amp = 1;
@@ -246,12 +234,10 @@ type Phenotype = {
 function getPhenotype(strain: Strain): Phenotype {
   const seed = strain.id * 17.31 + 0.5;
   const r = (n: number) => pseudoRandom(seed + n);
-
   const t = strain.type;
   const isIndica = t === "indica";
   const isSativa = t === "sativa";
   const isCBD = t === "cbd";
-
   const nameKey = (strain.name + " " + strain.genetics).toLowerCase();
   const isPurple = /(purple|granddaddy|blueberry|zkittlez|grape|gelato)/.test(nameKey);
   const isLemon = /(lemon|haze)/.test(nameKey);
@@ -270,15 +256,15 @@ function getPhenotype(strain: Strain): Phenotype {
     taper: isSativa ? 0.28 + r(2) * 0.08 : 0.18 + r(2) * 0.08,
     bumpStrength: 0.85 + r(4) * 0.4,
     asymmetry: 0.08 + r(5) * 0.12,
-    pistilCount: Math.floor(75 + r(6) * 65),
-    pistilLength: 0.25 + r(7) * 0.25,
+    pistilCount: Math.floor(70 + r(6) * 50),
+    pistilLength: 0.25 + r(7) * 0.22,
     pistilThickness: 0.004 + r(8) * 0.003,
     pistilWhiteRatio: isOrange ? 0.05 + r(9) * 0.12 : 0.18 + r(9) * 0.3,
     pistilHue: 0.045 + r(10) * 0.05,
     pistilCurve: 0.3 + r(11) * 0.4,
-    trichomeCount: isWhite ? Math.floor(600 + r(12) * 200) : Math.floor(420 + r(12) * 220),
+    trichomeCount: isWhite ? Math.floor(450 + r(12) * 150) : Math.floor(320 + r(12) * 180),
     trichomeSize: 0.011 + r(13) * 0.007,
-    trichomeGlow: isWhite ? 0.6 + r(14) * 0.3 : 0.4 + r(14) * 0.35,
+    trichomeGlow: isWhite ? 0.7 + r(14) * 0.3 : 0.5 + r(14) * 0.3,
     baseGreen,
     bumpHighlight,
     darkCrevice,
@@ -301,36 +287,27 @@ function budSurfacePoint(
   let x = Math.sin(phi) * Math.cos(theta);
   let y = Math.cos(phi);
   let z = Math.sin(phi) * Math.sin(theta);
-
   y *= pheno.elongation;
   const yNorm = y / pheno.elongation;
   const taperFactor = yNorm > 0 ? 1 - yNorm * pheno.taper : 1 + Math.abs(yNorm) * 0.06;
   x *= taperFactor;
   z *= taperFactor;
-
   const lean = Math.sin(yNorm * 1.5 + pheno.seed) * pheno.asymmetry;
   x += lean * Math.cos(pheno.seed);
   z += lean * Math.sin(pheno.seed);
-
-  // Apply approximate FBM displacement so pistils/trichomes follow surface
   const noise =
     fbm(x * 1.3, y * 0.9, z * 1.3, pheno.seed, 3) * 0.13 +
     fbm(x * 3.5, y * 2.5, z * 3.5, pheno.seed + 100, 3) * 0.06;
-
   const dist = Math.sqrt(x * x + y * y + z * z);
   const newDist = (dist + noise * pheno.bumpStrength) * radialMultiplier;
   const scale = newDist / dist;
-
   return [x * scale, y * scale, z * scale];
 }
 
-// === MAIN BUD BODY GEOMETRY ===
-// High-resolution icosahedron displaced with FBM noise → smooth, organic, knobbly
 function buildBudGeometry(pheno: Phenotype): THREE.BufferGeometry {
-  const geo = new THREE.IcosahedronGeometry(1, 7); // ~10k verts
+  const geo = new THREE.IcosahedronGeometry(1, 6); // detail 6 for stability
   const positions = geo.attributes.position;
   const colors: number[] = [];
-
   const purpleColor = new THREE.Color("#3a1f48");
   const yellowGreen = new THREE.Color("#9aa648");
   const whiteish = new THREE.Color("#c8d4b8");
@@ -339,73 +316,49 @@ function buildBudGeometry(pheno: Phenotype): THREE.BufferGeometry {
     let x = positions.getX(i);
     let y = positions.getY(i);
     let z = positions.getZ(i);
-
-    // Cola shape: stretch + taper
     y *= pheno.elongation;
     const yNorm = y / pheno.elongation;
     const taperFactor = yNorm > 0 ? 1 - yNorm * pheno.taper : 1 + Math.abs(yNorm) * 0.06;
     x *= taperFactor;
     z *= taperFactor;
-
-    // Asymmetric lean
     const lean = Math.sin(yNorm * 1.5 + pheno.seed) * pheno.asymmetry;
     x += lean * Math.cos(pheno.seed);
     z += lean * Math.sin(pheno.seed);
 
-    // Multi-octave organic noise displacement.
-    // Combination of low/medium/high frequency FBM with one strong calyx-cluster oscillation.
     const big = fbm(x * 1.3, y * 0.9, z * 1.3, pheno.seed, 3) * 0.14;
     const med = fbm(x * 3.5, y * 2.5, z * 3.5, pheno.seed + 100, 3) * 0.07;
     const fine = fbm(x * 9, y * 7, z * 9, pheno.seed + 200, 2) * 0.025;
-
     const totalBump = (big + med + fine) * pheno.bumpStrength;
 
     const dist = Math.sqrt(x * x + y * y + z * z);
-    const newDist = dist + totalBump;
-    const scale = newDist / dist;
-
+    const scale = (dist + totalBump) / dist;
     positions.setX(i, x * scale);
     positions.setY(i, y * scale);
     positions.setZ(i, z * scale);
 
-    // === Per-vertex coloring ===
     const variation = pseudoRandom(i * 3.456 + pheno.seed);
     const c = pheno.baseGreen.clone();
-
-    // Crevices darker (negative bump areas)
     if (totalBump < -0.02) {
       const darkAmount = Math.min(1, (-totalBump - 0.02) * 7);
       c.lerp(pheno.darkCrevice, darkAmount * 0.7);
     }
-
-    // Bulges slightly highlighted
     if (totalBump > 0.03) {
       const liftAmount = Math.min(1, (totalBump - 0.03) * 6);
       c.lerp(pheno.bumpHighlight, liftAmount * 0.45);
     }
-
-    // Purple tinting (indica / purple strains)
     if (pheno.purpleHint > 0) {
       const purpleAmt = pheno.purpleHint * (0.35 + variation * 0.65);
-      // Purple shows more on the bulges (exposed parts of bud get more sun → more anthocyanin)
       const purpleBoost = totalBump > 0.02 ? 1.3 : 0.8;
       c.lerp(purpleColor, purpleAmt * 0.55 * purpleBoost);
     }
-
-    // Yellow tint (lemon strains)
     if (pheno.yellowHint > 0) {
       c.lerp(yellowGreen, pheno.yellowHint * 0.45 * variation);
     }
-
-    // Frost tint (white strains)
     if (pheno.whiteHint > 0) {
       c.lerp(whiteish, pheno.whiteHint * 0.3);
     }
-
-    // Per-vertex random lightness for organic variation
     const lightness = 0.85 + pseudoRandom(i * 7.89 + pheno.seed) * 0.3;
     c.multiplyScalar(lightness);
-
     colors.push(c.r, c.g, c.b);
   }
 
@@ -414,8 +367,6 @@ function buildBudGeometry(pheno: Phenotype): THREE.BufferGeometry {
   return geo;
 }
 
-// === CURVED PISTIL ===
-// Generates a TubeGeometry along a Bezier curve, with up-curl and random side bend
 function buildCurvedPistilGeometry(
   surfacePos: [number, number, number],
   outDirection: THREE.Vector3,
@@ -425,18 +376,13 @@ function buildCurvedPistilGeometry(
   seed: number
 ): THREE.BufferGeometry {
   const start = new THREE.Vector3(...surfacePos);
-
-  // Random perpendicular direction for side-curve
   const tempSide = new THREE.Vector3(
     pseudoRandom(seed * 7) - 0.5,
     pseudoRandom(seed * 11) - 0.5,
     pseudoRandom(seed * 13) - 0.5
   );
   const side = new THREE.Vector3().crossVectors(outDirection, tempSide).normalize();
-
-  // Pistils tend to curl upward and outward
   const upBias = 0.25 + pseudoRandom(seed * 17) * 0.2;
-
   const p0 = start;
   const p1 = start.clone().add(outDirection.clone().multiplyScalar(length * 0.3));
   const p2 = start.clone()
@@ -447,14 +393,10 @@ function buildCurvedPistilGeometry(
     .add(outDirection.clone().multiplyScalar(length * 0.92))
     .add(side.clone().multiplyScalar(curveAmount * length * 0.5))
     .add(new THREE.Vector3(0, length * upBias, 0));
-
   const curve = new THREE.CatmullRomCurve3([p0, p1, p2, p3]);
-
-  // Slight taper at tip — smaller tube radius near the end
-  return new THREE.TubeGeometry(curve, 10, thickness, 5, false);
+  return new THREE.TubeGeometry(curve, 8, thickness, 5, false);
 }
 
-// === SUGAR LEAF SHAPE — cannabis-style serrated leaf ===
 function makeSugarLeafShape(): THREE.Shape {
   const s = new THREE.Shape();
   s.moveTo(0, 0);
@@ -467,7 +409,6 @@ function makeSugarLeafShape(): THREE.Shape {
   s.bezierCurveTo(-0.06, 0.74, -0.14, 0.84, -0.18, 0.88);
   s.lineTo(-0.06, 0.92);
   s.bezierCurveTo(-0.02, 0.96, 0, 1.0, 0, 1.0);
-  // Mirror
   s.bezierCurveTo(0, 1.0, 0.02, 0.96, 0.06, 0.92);
   s.lineTo(0.18, 0.88);
   s.bezierCurveTo(0.14, 0.84, 0.06, 0.74, 0.14, 0.66);
@@ -480,50 +421,12 @@ function makeSugarLeafShape(): THREE.Shape {
   return s;
 }
 
-// Procedural noise texture for bump/roughness micro-detail
-function generateBumpTexture(size = 256, seed = 0): THREE.CanvasTexture {
-  if (typeof document === "undefined") {
-    // SSR fallback
-    const blank = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);
-    blank.needsUpdate = true;
-    return blank as unknown as THREE.CanvasTexture;
-  }
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  const imgData = ctx.createImageData(size, size);
-  for (let i = 0; i < imgData.data.length; i += 4) {
-    // Multi-octave noise per pixel
-    const px = (i / 4) % size;
-    const py = Math.floor((i / 4) / size);
-    const n1 = pseudoRandom(px * 1.7 + py * 3.1 + seed) * 0.5;
-    const n2 = pseudoRandom(px * 0.3 + py * 0.5 + seed * 2) * 0.3;
-    const n3 = pseudoRandom(px * 5.1 + py * 7.3 + seed * 3) * 0.2;
-    const v = Math.floor((n1 + n2 + n3) * 255);
-    imgData.data[i] = v;
-    imgData.data[i + 1] = v;
-    imgData.data[i + 2] = v;
-    imgData.data[i + 3] = 255;
-  }
-  ctx.putImageData(imgData, 0, 0);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(4, 4);
-  return tex;
-}
-
 function rotationFromDir(dir: THREE.Vector3): [number, number, number] {
   const up = new THREE.Vector3(0, 1, 0);
   const q = new THREE.Quaternion().setFromUnitVectors(up, dir.clone().normalize());
   const e = new THREE.Euler().setFromQuaternion(q);
   return [e.x, e.y, e.z];
 }
-
-// =================================================================
-// BUD COMPONENT
-// =================================================================
 
 function Bud({ strain }: { strain: Strain }) {
   const groupRef = useRef<THREE.Group>(null);
@@ -532,41 +435,21 @@ function Bud({ strain }: { strain: Strain }) {
     const pheno = getPhenotype(strain);
     const bodyGeometry = buildBudGeometry(pheno);
 
-    // === PISTILS — curved tubes with bezier curves ===
-    const pistils: Array<{
-      geometry: THREE.BufferGeometry;
-      color: THREE.Color;
-    }> = [];
+    const pistils: Array<{ geometry: THREE.BufferGeometry; color: THREE.Color }> = [];
     for (let i = 0; i < pheno.pistilCount; i++) {
       const s = pheno.seed + i * 7.89;
       const theta = pseudoRandom(s) * Math.PI * 2;
-      // Bias upper hemisphere
       const phi = Math.acos(2 * (pseudoRandom(s + 1) * 0.72 + 0.05) - 0.15);
-
-      // Get surface position (with noise!) and slightly inside (so pistil emerges from inside)
       const surfacePos = budSurfacePoint(theta, phi, pheno, 0.97);
-
-      // Outward direction (from origin through surface, biased up)
       const outDir = new THREE.Vector3(
         surfacePos[0],
         surfacePos[1] + 0.15,
         surfacePos[2]
       ).normalize();
-
       const length = pheno.pistilLength * (0.65 + pseudoRandom(s + 2) * 0.7);
       const thickness = pheno.pistilThickness * (0.7 + pseudoRandom(s + 3) * 0.6);
       const curve = pheno.pistilCurve * (0.5 + pseudoRandom(s + 4) * 1);
-
-      const geometry = buildCurvedPistilGeometry(
-        surfacePos,
-        outDir,
-        length,
-        thickness,
-        curve,
-        s
-      );
-
-      // Color: white → yellow → orange → red gradient
+      const geometry = buildCurvedPistilGeometry(surfacePos, outDir, length, thickness, curve, s);
       const t = pseudoRandom(s + 5);
       let color: THREE.Color;
       if (t < pheno.pistilWhiteRatio) {
@@ -577,16 +460,10 @@ function Bud({ strain }: { strain: Strain }) {
         const lig = 0.4 + pseudoRandom(s + 8) * 0.2;
         color = new THREE.Color().setHSL(hue, sat, lig);
       }
-
       pistils.push({ geometry, color });
     }
 
-    // === TRICHOMES — small capsules with rotation following surface ===
-    const trichomes: Array<{
-      position: [number, number, number];
-      rotation: [number, number, number];
-      size: number;
-    }> = [];
+    const trichomes: Array<{ position: [number, number, number]; rotation: [number, number, number]; size: number }> = [];
     for (let i = 0; i < pheno.trichomeCount; i++) {
       const s = pheno.seed + i * 2.7183;
       const theta = pseudoRandom(s) * Math.PI * 2;
@@ -594,23 +471,13 @@ function Bud({ strain }: { strain: Strain }) {
       const pos = budSurfacePoint(theta, phi, pheno, 1.015 + pseudoRandom(s + 2) * 0.02);
       const outDir = new THREE.Vector3(pos[0], pos[1], pos[2]).normalize();
       const size = pheno.trichomeSize * (0.55 + pseudoRandom(s + 3) * 0.9);
-      // Trichome sits on surface and points outward
       const sx = pos[0] + outDir.x * size * 1.2;
       const sy = pos[1] + outDir.y * size * 1.2;
       const sz = pos[2] + outDir.z * size * 1.2;
-      trichomes.push({
-        position: [sx, sy, sz],
-        rotation: rotationFromDir(outDir),
-        size,
-      });
+      trichomes.push({ position: [sx, sy, sz], rotation: rotationFromDir(outDir), size });
     }
 
-    // === SUGAR LEAVES ===
-    const leaves: Array<{
-      position: [number, number, number];
-      rotation: [number, number, number];
-      scale: number;
-    }> = [];
+    const leaves: Array<{ position: [number, number, number]; rotation: [number, number, number]; scale: number }> = [];
     for (let i = 0; i < pheno.sugarLeafCount; i++) {
       const s = pheno.seed + i * 13.7;
       const theta = pseudoRandom(s) * Math.PI * 2;
@@ -622,24 +489,13 @@ function Bud({ strain }: { strain: Strain }) {
       const baseRot = rotationFromDir(outDir);
       const spinZ = pseudoRandom(s + 3) * Math.PI * 2;
       leaves.push({
-        position: [
-          pos[0] + outDir.x * offset,
-          pos[1] + outDir.y * offset,
-          pos[2] + outDir.z * offset,
-        ],
+        position: [pos[0] + outDir.x * offset, pos[1] + outDir.y * offset, pos[2] + outDir.z * offset],
         rotation: [baseRot[0], baseRot[1], spinZ],
         scale: scl,
       });
     }
 
-    // === SIDE BRANCHES with mini-buds ===
-    const branches: Array<{
-      origin: [number, number, number];
-      rotation: [number, number, number];
-      length: number;
-      hasMiniBud: boolean;
-      miniBudGeometry?: THREE.BufferGeometry;
-    }> = [];
+    const branches: Array<{ origin: [number, number, number]; rotation: [number, number, number]; length: number; hasMiniBud: boolean; miniBudGeometry?: THREE.BufferGeometry }> = [];
     if (pheno.hasBranches) {
       for (let i = 0; i < pheno.branchCount; i++) {
         const s = pheno.seed + i * 23.4;
@@ -648,20 +504,10 @@ function Bud({ strain }: { strain: Strain }) {
         const yNorm = yPos / pheno.elongation;
         const taperFactor = yNorm > 0 ? 1 - yNorm * pheno.taper : 1 + Math.abs(yNorm) * 0.06;
         const r = 0.85 * taperFactor;
-        const origin: [number, number, number] = [
-          Math.cos(theta) * r,
-          yPos,
-          Math.sin(theta) * r,
-        ];
-        const outDir = new THREE.Vector3(
-          Math.cos(theta) * 1.5,
-          -0.2 + pseudoRandom(s + 2) * 0.5,
-          Math.sin(theta) * 1.5
-        ).normalize();
+        const origin: [number, number, number] = [Math.cos(theta) * r, yPos, Math.sin(theta) * r];
+        const outDir = new THREE.Vector3(Math.cos(theta) * 1.5, -0.2 + pseudoRandom(s + 2) * 0.5, Math.sin(theta) * 1.5).normalize();
         const length = 0.3 + pseudoRandom(s + 3) * 0.3;
         const hasMiniBud = pseudoRandom(s + 4) > 0.25;
-
-        // Mini-bud: simple deformed sphere
         let miniBudGeometry: THREE.BufferGeometry | undefined;
         if (hasMiniBud) {
           const mGeo = new THREE.IcosahedronGeometry(0.2, 3);
@@ -680,34 +526,22 @@ function Bud({ strain }: { strain: Strain }) {
           mGeo.computeVertexNormals();
           miniBudGeometry = mGeo;
         }
-
-        branches.push({
-          origin,
-          rotation: rotationFromDir(outDir),
-          length,
-          hasMiniBud,
-          miniBudGeometry,
-        });
+        branches.push({ origin, rotation: rotationFromDir(outDir), length, hasMiniBud, miniBudGeometry });
       }
     }
 
     return { pheno, bodyGeometry, pistils, trichomes, leaves, branches };
   }, [strain]);
 
-  // Procedural bump texture (regenerated per strain for slight variation)
-  const bumpTexture = useMemo(() => generateBumpTexture(256, data.pheno.seed), [data.pheno.seed]);
-
   const sugarLeafShape = useMemo(() => makeSugarLeafShape(), []);
 
-  // Cleanup geometries on unmount or strain change
   useEffect(() => {
     return () => {
       data.bodyGeometry.dispose();
       data.pistils.forEach((p) => p.geometry.dispose());
       data.branches.forEach((b) => b.miniBudGeometry?.dispose());
-      bumpTexture.dispose();
     };
-  }, [data, bumpTexture]);
+  }, [data]);
 
   useFrame((_, delta) => {
     if (groupRef.current) {
@@ -715,59 +549,47 @@ function Bud({ strain }: { strain: Strain }) {
     }
   });
 
-  const stemColor = "#5a4225";
-  const stemColorLight = "#7b5e35";
-
   return (
     <group ref={groupRef} position={[0, 0.1, 0]}>
-      {/* === STEM === */}
+      {/* Stem */}
       <mesh position={[0, -data.pheno.elongation - 0.28, 0]}>
         <cylinderGeometry args={[0.05, 0.065, 0.5, 12]} />
-        <meshStandardMaterial color={stemColor} roughness={0.88} metalness={0.05} />
+        <meshStandardMaterial color="#5a4225" roughness={0.88} metalness={0.05} />
       </mesh>
       <mesh position={[0, -data.pheno.elongation, 0]}>
         <sphereGeometry args={[0.08, 14, 10]} />
-        <meshStandardMaterial color={stemColorLight} roughness={0.8} />
+        <meshStandardMaterial color="#7b5e35" roughness={0.8} />
       </mesh>
 
-      {/* === SIDE BRANCHES === */}
+      {/* Side branches */}
       {data.branches.map((b, i) => (
         <group key={`br-${i}`} position={b.origin} rotation={b.rotation}>
           <mesh position={[0, b.length / 2, 0]}>
             <cylinderGeometry args={[0.014, 0.025, b.length, 8]} />
-            <meshStandardMaterial color={stemColor} roughness={0.88} />
+            <meshStandardMaterial color="#5a4225" roughness={0.88} />
           </mesh>
           {b.hasMiniBud && b.miniBudGeometry && (
             <mesh position={[0, b.length + 0.15, 0]} geometry={b.miniBudGeometry}>
-              <meshPhysicalMaterial
+              <meshStandardMaterial
                 color={data.pheno.baseGreen.clone().multiplyScalar(0.92)}
                 roughness={0.6}
                 metalness={0.02}
-                clearcoat={0.2}
-                clearcoatRoughness={0.5}
               />
             </mesh>
           )}
         </group>
       ))}
 
-      {/* === MAIN BUD BODY === */}
-      <mesh geometry={data.bodyGeometry} castShadow receiveShadow>
-        <meshPhysicalMaterial
+      {/* Main bud body */}
+      <mesh geometry={data.bodyGeometry}>
+        <meshStandardMaterial
           vertexColors
           roughness={0.55}
           metalness={0.0}
-          clearcoat={0.35}
-          clearcoatRoughness={0.55}
-          bumpMap={bumpTexture}
-          bumpScale={0.025}
-          sheen={0.3}
-          sheenColor={new THREE.Color("#9bb070")}
-          sheenRoughness={0.8}
         />
       </mesh>
 
-      {/* === SUGAR LEAVES === */}
+      {/* Sugar leaves */}
       {data.leaves.map((l, i) => (
         <mesh
           key={`leaf-${i}`}
@@ -776,18 +598,16 @@ function Bud({ strain }: { strain: Strain }) {
           scale={[l.scale, l.scale, l.scale]}
         >
           <shapeGeometry args={[sugarLeafShape]} />
-          <meshPhysicalMaterial
+          <meshStandardMaterial
             color={data.pheno.baseGreen.clone().multiplyScalar(1.2)}
             roughness={0.65}
             metalness={0.02}
             side={THREE.DoubleSide}
-            clearcoat={0.25}
-            clearcoatRoughness={0.7}
           />
         </mesh>
       ))}
 
-      {/* === CURVED PISTILS === */}
+      {/* Curved pistils */}
       {data.pistils.map((p, i) => (
         <mesh key={`p-${i}`} geometry={p.geometry}>
           <meshStandardMaterial
@@ -795,25 +615,20 @@ function Bud({ strain }: { strain: Strain }) {
             roughness={0.7}
             metalness={0.0}
             emissive={p.color}
-            emissiveIntensity={0.04}
+            emissiveIntensity={0.05}
           />
         </mesh>
       ))}
 
-      {/* === TRICHOMES — glassy capsules === */}
-      <Instances limit={900} range={data.trichomes.length}>
+      {/* Trichomes — bright metallic capsules */}
+      <Instances limit={700} range={data.trichomes.length}>
         <capsuleGeometry args={[1, 1.4, 4, 6]} />
-        <meshPhysicalMaterial
+        <meshStandardMaterial
           color="#fff8e0"
           emissive="#fff4c0"
-          emissiveIntensity={data.pheno.trichomeGlow * 0.5}
-          roughness={0.05}
-          metalness={0.2}
-          clearcoat={1.0}
-          clearcoatRoughness={0.05}
-          transmission={0.25}
-          ior={1.45}
-          thickness={0.5}
+          emissiveIntensity={data.pheno.trichomeGlow}
+          roughness={0.08}
+          metalness={0.7}
         />
         {data.trichomes.map((t, i) => (
           <Instance
@@ -828,10 +643,6 @@ function Bud({ strain }: { strain: Strain }) {
   );
 }
 
-// =================================================================
-// VIEWER
-// =================================================================
-
 function BudViewer({ strain }: { strain: Strain }) {
   return (
     <Canvas
@@ -840,28 +651,23 @@ function BudViewer({ strain }: { strain: Strain }) {
       gl={{ antialias: true, alpha: true }}
     >
       <Suspense fallback={null}>
-        <Environment preset="forest" background={false} environmentIntensity={0.8} />
-
-        <directionalLight position={[5, 8, 5]} intensity={1.5} color="#fff6e3" castShadow />
-        <directionalLight position={[-5, 3, -3]} intensity={0.8} color="#a8c4ff" />
+        <Environment preset="forest" background={false} />
+        <directionalLight position={[5, 8, 5]} intensity={1.4} color="#fff6e3" />
+        <directionalLight position={[-5, 3, -3]} intensity={0.7} color="#a8c4ff" />
         <directionalLight position={[0, -2, 4]} intensity={0.4} color="#ffd9a8" />
-        <pointLight position={[3, 4, 2]} intensity={0.6} color="#ffffff" distance={12} />
-        <pointLight position={[-2, 1, 3]} intensity={0.3} color="#e8f0ff" distance={8} />
-        <ambientLight intensity={0.2} />
-
+        <pointLight position={[3, 4, 2]} intensity={0.5} color="#ffffff" distance={12} />
+        <ambientLight intensity={0.25} />
         <Float speed={1.2} rotationIntensity={0.25} floatIntensity={0.2}>
           <Bud strain={strain} />
         </Float>
-
         <ContactShadows
           position={[0, -1.85, 0]}
-          opacity={0.6}
+          opacity={0.55}
           blur={2.8}
           far={3}
           scale={5}
           color="#000000"
         />
-
         <OrbitControls
           enableZoom={false}
           enablePan={false}
@@ -874,9 +680,7 @@ function BudViewer({ strain }: { strain: Strain }) {
   );
 }
 
-// =================================================================
-// MAIN PAGE
-// =================================================================
+// ===================== MAIN PAGE =====================
 
 export default function Home() {
   const [filter, setFilter] = useState<string>("all");
@@ -925,8 +729,11 @@ export default function Home() {
           font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased;
           background-image: radial-gradient(at 12% 18%, rgba(139, 69, 19, 0.04) 0px, transparent 50%), radial-gradient(at 88% 72%, rgba(31, 53, 32, 0.05) 0px, transparent 50%);
           min-height: 100vh;
+          overflow-x: hidden;
         }
         .container { max-width: 1240px; margin: 0 auto; padding: 0 32px; position: relative; z-index: 2; }
+
+        /* HEADER */
         header { padding: 28px 0; border-bottom: 1px solid var(--line); position: relative; z-index: 10; }
         .header-inner { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
         .brand { display: flex; align-items: baseline; gap: 10px; }
@@ -937,14 +744,18 @@ export default function Home() {
         nav a { font-size: 13px; color: var(--ink-soft); text-decoration: none; letter-spacing: 0.02em; padding: 4px 0; transition: color 0.25s ease; }
         nav a:hover { color: var(--forest); }
         .header-meta { font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-mute); }
+
+        /* HERO */
         .hero { padding: 96px 0 80px; position: relative; }
         .hero-eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--copper); margin-bottom: 32px; display: flex; align-items: center; gap: 16px; }
         .hero-eyebrow::before { content: ''; width: 32px; height: 1px; background: var(--copper); }
-        .hero h1 { font-family: var(--display); font-weight: 300; font-size: clamp(48px, 7vw, 88px); line-height: 1.02; letter-spacing: -0.025em; max-width: 950px; font-variation-settings: "SOFT" 50, "opsz" 144; }
+        .hero h1 { font-family: var(--display); font-weight: 300; font-size: clamp(36px, 7vw, 88px); line-height: 1.05; letter-spacing: -0.025em; max-width: 950px; font-variation-settings: "SOFT" 50, "opsz" 144; }
         .hero h1 em { font-style: italic; font-weight: 300; color: var(--forest); }
         .hero-meta { margin-top: 48px; display: flex; gap: 64px; flex-wrap: wrap; padding-top: 32px; border-top: 1px solid var(--line); max-width: 720px; }
         .hero-meta-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-mute); }
         .hero-meta-value { font-family: var(--display); font-size: 22px; font-style: italic; }
+
+        /* FILTER */
         .filter-section { padding: 24px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--paper); position: sticky; top: 0; z-index: 50; backdrop-filter: blur(8px); }
         .filter-row { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; }
         .search-wrap { flex: 1; position: relative; }
@@ -955,16 +766,16 @@ export default function Home() {
         .filter-inner { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
         .filter-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .filter-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-mute); margin-right: 4px; }
-        .filter-pill { padding: 7px 16px; background: transparent; border: 1px solid var(--line-strong); border-radius: 100px; font-family: var(--sans); font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor: pointer; transition: all 0.2s ease; }
+        .filter-pill { padding: 7px 16px; background: transparent; border: 1px solid var(--line-strong); border-radius: 100px; font-family: var(--sans); font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor: pointer; transition: all 0.2s ease; white-space: nowrap; }
         .filter-pill:hover { border-color: var(--ink); color: var(--ink); }
         .filter-pill.active { background: var(--ink); border-color: var(--ink); color: var(--cream); }
         .results-count { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; color: var(--ink-mute); text-transform: uppercase; white-space: nowrap; }
         .results-count strong { font-weight: 500; color: var(--ink); }
+
+        /* STRAINS */
         .strains-section { padding: 64px 0 120px; }
         .empty-state { text-align: center; padding: 80px 20px; font-family: var(--display); font-style: italic; font-size: 24px; color: var(--ink-mute); }
         .strain-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px 24px; }
-        @media (max-width: 900px) { .strain-grid { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 600px) { .strain-grid { grid-template-columns: 1fr; } .filter-inner { flex-direction: column; align-items: flex-start; } }
         .strain-card { background: var(--paper); border: 1px solid var(--line); cursor: pointer; transition: all 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); overflow: hidden; display: flex; flex-direction: column; }
         .strain-card:hover { transform: translateY(-4px); border-color: var(--line-strong); box-shadow: 0 20px 40px -20px rgba(26, 26, 24, 0.15); }
         .strain-card-visual { height: 200px; position: relative; overflow: hidden; }
@@ -981,6 +792,8 @@ export default function Home() {
         .strain-card-terpene { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
         .terpene-name { font-size: 13px; color: var(--ink-soft); font-weight: 500; }
         .terpene-icon { width: 6px; height: 6px; border-radius: 50%; background: var(--copper); }
+
+        /* MODAL */
         .modal-overlay { position: fixed; inset: 0; background: rgba(26, 26, 24, 0.75); backdrop-filter: blur(8px); z-index: 100; display: flex; align-items: flex-start; justify-content: center; padding: 40px 20px; overflow-y: auto; animation: fadeIn 0.3s ease; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .modal { background: var(--paper); max-width: 900px; width: 100%; border-radius: 4px; overflow: hidden; position: relative; animation: slideUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
@@ -1013,10 +826,95 @@ export default function Home() {
         .terpene-row-value { font-family: var(--mono); font-size: 12px; text-align: right; }
         .effects-tags { display: flex; flex-wrap: wrap; gap: 10px; }
         .effect-tag { padding: 8px 16px; background: var(--cream); border: 1px solid var(--line); border-radius: 100px; font-size: 13px; color: var(--ink-soft); font-weight: 500; }
+
+        /* FOOTER */
         footer { background: var(--ink); color: var(--cream); padding: 80px 0 32px; position: relative; z-index: 2; }
         .disclaimer { background: rgba(139, 69, 19, 0.12); border: 1px solid rgba(139, 69, 19, 0.25); padding: 20px 24px; border-radius: 4px; margin-bottom: 48px; font-size: 13px; line-height: 1.6; color: rgba(244, 239, 229, 0.85); }
         .disclaimer strong { color: var(--copper); display: block; margin-bottom: 4px; letter-spacing: 0.05em; font-size: 11px; text-transform: uppercase; font-family: var(--mono); }
         .footer-bottom { padding-top: 32px; border-top: 1px solid rgba(244, 239, 229, 0.1); display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: rgba(244, 239, 229, 0.5); flex-wrap: wrap; gap: 16px; letter-spacing: 0.05em; }
+
+        /* =========== TABLET =========== */
+        @media (max-width: 900px) {
+          .container { padding: 0 24px; }
+          .strain-grid { grid-template-columns: repeat(2, 1fr); gap: 24px 20px; }
+          nav ul { gap: 24px; }
+          .header-meta { display: none; }
+          .hero { padding: 64px 0 56px; }
+          .hero-meta { gap: 32px; }
+          .modal-hero { height: 380px; }
+          .modal-name { font-size: 44px; }
+          .modal-body { padding: 36px 32px; }
+        }
+
+        /* =========== MOBILE =========== */
+        @media (max-width: 600px) {
+          .container { padding: 0 16px; }
+
+          /* Header → vertikal, kompakt */
+          header { padding: 16px 0; }
+          .header-inner { flex-direction: column; align-items: flex-start; gap: 12px; }
+          .brand { gap: 8px; }
+          .brand-mark { font-size: 20px; }
+          .brand-tag { font-size: 9px; }
+          nav { width: 100%; }
+          nav ul { gap: 16px; flex-wrap: wrap; }
+          nav a { font-size: 12px; }
+
+          /* Hero — kleiner, weniger padding */
+          .hero { padding: 40px 0 32px; }
+          .hero-eyebrow { font-size: 10px; margin-bottom: 20px; gap: 12px; }
+          .hero-eyebrow::before { width: 20px; }
+          .hero h1 { font-size: 32px; line-height: 1.1; }
+          .hero-meta { gap: 20px; margin-top: 28px; padding-top: 20px; flex-direction: row; flex-wrap: wrap; }
+          .hero-meta > div { flex: 1; min-width: 100px; }
+          .hero-meta-value { font-size: 18px; }
+          .hero-meta-label { font-size: 9px; }
+
+          /* Filter section */
+          .filter-section { padding: 16px 0; }
+          .filter-row { margin-bottom: 12px; }
+          .search-input { font-size: 14px; padding: 10px 14px 10px 38px; }
+          .filter-inner { flex-direction: column; align-items: flex-start; gap: 12px; }
+          .filter-group { gap: 8px; }
+          .filter-pill { padding: 6px 12px; font-size: 12px; }
+          .filter-label { display: none; }
+
+          /* Strain grid 1 col */
+          .strains-section { padding: 32px 0 64px; }
+          .strain-grid { grid-template-columns: 1fr; gap: 20px; }
+          .strain-card-visual { height: 180px; }
+          .strain-card-body { padding: 20px 20px 24px; }
+          .strain-card-name { font-size: 22px; }
+
+          /* Modal vollformatig */
+          .modal-overlay { padding: 0; align-items: stretch; }
+          .modal { max-width: 100%; border-radius: 0; min-height: 100vh; }
+          .modal-close { top: 16px; right: 16px; width: 36px; height: 36px; font-size: 18px; }
+          .modal-hero { height: 320px; }
+          .modal-hero-content { left: 20px; bottom: 16px; }
+          .modal-hint { right: 16px; bottom: 16px; font-size: 9px; letter-spacing: 0.12em; }
+          .modal-number { font-size: 10px; margin-bottom: 8px; }
+          .modal-name { font-size: 36px; }
+          .modal-body { padding: 28px 20px 40px; }
+          .modal-section { margin-bottom: 28px; }
+          .modal-description { font-size: 15px; }
+          .modal-description::first-letter { font-size: 36px; margin: 4px 6px 0 0; }
+          .modal-stats-grid { grid-template-columns: 1fr; gap: 12px; }
+          .modal-stat { padding: 16px; }
+          .modal-stat-value { font-size: 26px; }
+
+          /* Terpen-Zeile gestapelt */
+          .terpene-row { grid-template-columns: 1fr; gap: 6px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+          .terpene-row:last-child { border-bottom: none; }
+          .terpene-row-value { text-align: left; }
+          .terpene-bar { width: 100%; }
+          .effect-tag { font-size: 12px; padding: 6px 12px; }
+
+          /* Footer */
+          footer { padding: 48px 0 24px; }
+          .disclaimer { padding: 16px; font-size: 12px; margin-bottom: 28px; }
+          .footer-bottom { font-size: 10px; }
+        }
       `}</style>
 
       <header>
@@ -1085,7 +983,7 @@ export default function Home() {
                 { v: "indica", l: "Indica" },
                 { v: "sativa", l: "Sativa" },
                 { v: "hybrid", l: "Hybrid" },
-                { v: "cbd", l: "CBD-dominant" },
+                { v: "cbd", l: "CBD" },
               ].map((f) => (
                 <button
                   key={f.v}
@@ -1147,7 +1045,7 @@ export default function Home() {
                 <div className="modal-number">N° {String(selected.id).padStart(3, "0")} · {selected.typeLabel}</div>
                 <div className="modal-name">{selected.name}</div>
               </div>
-              <div className="modal-hint">Klicken & ziehen zum Drehen</div>
+              <div className="modal-hint">Klicken & ziehen</div>
             </div>
             <div className="modal-body">
               <div className="modal-section">
