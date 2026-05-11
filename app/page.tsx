@@ -149,91 +149,257 @@ function pseudoRandom(seed: number) {
   return x - Math.floor(x);
 }
 
-function Bud({ tint }: { tint: string }) {
-  const meshRef = useRef<THREE.Group>(null);
+// ===== 3D BUD =====
+// Maps a unit sphere coord to the actual bud surface shape (cola form)
+function budSurface(theta: number, phi: number, scale = 1): [number, number, number] {
+  let x = Math.sin(phi) * Math.cos(theta);
+  let y = Math.cos(phi);
+  let z = Math.sin(phi) * Math.sin(theta);
+  // Stretch vertically — buds are elongated, not round
+  y *= 1.45;
+  // Taper toward the top (cola shape)
+  const taper = y > 0 ? 1 - y * 0.18 : 1 + Math.abs(y) * 0.04;
+  x *= taper;
+  z *= taper;
+  return [x * scale, y * scale, z * scale];
+}
 
-  const geometry = useMemo(() => {
-    const geo = new THREE.IcosahedronGeometry(1, 5);
+function Bud({ tint, purpleHint }: { tint: string; purpleHint: number }) {
+  const groupRef = useRef<THREE.Group>(null);
+
+  const { mainGeometry, pistils, trichomes, leaves } = useMemo(() => {
+    // ---- Main body: elongated icosahedron with calyx-like bumps ----
+    const geo = new THREE.IcosahedronGeometry(1, 6);
     const positions = geo.attributes.position;
+    const colors: number[] = [];
+
+    const baseColor = new THREE.Color(tint);
+    const purpleColor = new THREE.Color("#3a2545");
 
     for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i);
-      const y = positions.getY(i);
-      const z = positions.getZ(i);
+      let x = positions.getX(i);
+      let y = positions.getY(i);
+      let z = positions.getZ(i);
 
-      const noise1 = Math.sin(x * 3.2) * Math.cos(y * 3.2) * Math.sin(z * 3.2) * 0.18;
-      const noise2 = Math.sin(x * 7) * Math.cos(y * 7) * 0.06;
-      const bumpiness = pseudoRandom(i * 12.9898) * 0.1;
+      // Elongate vertically
+      y *= 1.45;
+      // Taper toward top
+      const taper = y > 0 ? 1 - y * 0.18 : 1 + Math.abs(y) * 0.04;
+      x *= taper;
+      z *= taper;
 
-      const length = Math.sqrt(x * x + y * y + z * z);
-      const scale = (length + noise1 + noise2 + bumpiness) / length;
+      // Calyx structure — radial high-frequency bumps that look like overlapping kelche
+      const angle = Math.atan2(z, x);
+      const calyx =
+        Math.sin(angle * 7 + y * 4) * 0.06 +
+        Math.cos(angle * 5 - y * 2.5) * 0.05 +
+        Math.sin(y * 8) * Math.cos(angle * 3) * 0.04;
+
+      // Surface roughness
+      const surface = (pseudoRandom(i * 12.9898) - 0.5) * 0.05;
+
+      const totalDist = Math.sqrt(x * x + y * y + z * z);
+      const newDist = totalDist + calyx + surface;
+      const scale = newDist / totalDist;
 
       positions.setX(i, x * scale);
       positions.setY(i, y * scale);
       positions.setZ(i, z * scale);
+
+      // Per-vertex color: slight variation between base green and purple hint
+      const variation = pseudoRandom(i * 3.456);
+      const mixAmount = Math.min(1, variation * purpleHint * 1.5);
+      const c = baseColor.clone().lerp(purpleColor, mixAmount * 0.4);
+      // Add slight overall variation
+      const lightness = 0.85 + pseudoRandom(i * 7.89) * 0.3;
+      c.multiplyScalar(lightness);
+      colors.push(c.r, c.g, c.b);
     }
 
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     geo.computeVertexNormals();
-    return geo;
-  }, []);
+
+    // ---- Pistils: thin orange-red hairs protruding outward ----
+    const pistilsArr: Array<{
+      position: [number, number, number];
+      rotation: [number, number, number];
+      length: number;
+      color: string;
+    }> = [];
+    const pistilColors = ["#c66428", "#b85220", "#d4732e", "#a04018", "#cc6622", "#b04515"];
+    for (let i = 0; i < 42; i++) {
+      const seed = i * 7.89;
+      const theta = pseudoRandom(seed) * Math.PI * 2;
+      // Bias toward upper hemisphere (pistils mostly on top of buds)
+      const phiRaw = pseudoRandom(seed + 1);
+      const phi = Math.acos(2 * (phiRaw * 0.7) - 0.2);
+
+      const surfacePos = budSurface(theta, phi);
+
+      // Outward direction (from origin through surface point, biased slightly up)
+      const dirLen = Math.sqrt(
+        surfacePos[0] ** 2 + surfacePos[1] ** 2 + surfacePos[2] ** 2
+      );
+      let dx = surfacePos[0] / dirLen;
+      let dy = surfacePos[1] / dirLen + 0.2;
+      let dz = surfacePos[2] / dirLen;
+      const ndLen = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      dx /= ndLen;
+      dy /= ndLen;
+      dz /= ndLen;
+
+      const length = 0.16 + pseudoRandom(seed + 2) * 0.16;
+
+      // Center of cylinder
+      const cx = surfacePos[0] + dx * length * 0.5;
+      const cy = surfacePos[1] + dy * length * 0.5;
+      const cz = surfacePos[2] + dz * length * 0.5;
+
+      // Cylinder default is along +Y, rotate so it points along (dx,dy,dz)
+      const up = new THREE.Vector3(0, 1, 0);
+      const dir = new THREE.Vector3(dx, dy, dz);
+      const quat = new THREE.Quaternion().setFromUnitVectors(up, dir);
+      const euler = new THREE.Euler().setFromQuaternion(quat);
+
+      pistilsArr.push({
+        position: [cx, cy, cz],
+        rotation: [euler.x, euler.y, euler.z],
+        length,
+        color: pistilColors[Math.floor(pseudoRandom(seed + 3) * pistilColors.length)],
+      });
+    }
+
+    // ---- Trichomes: dense glittering crystals on the surface ----
+    const trichomesArr: Array<{
+      position: [number, number, number];
+      size: number;
+    }> = [];
+    for (let i = 0; i < 240; i++) {
+      const seed = i * 2.7183;
+      const theta = pseudoRandom(seed) * Math.PI * 2;
+      const phi = Math.acos(2 * pseudoRandom(seed + 1) - 1);
+      const scale = 1.03 + pseudoRandom(seed + 2) * 0.04;
+      const pos = budSurface(theta, phi, scale);
+      const size = 0.011 + pseudoRandom(seed + 3) * 0.015;
+      trichomesArr.push({ position: pos, size });
+    }
+
+    // ---- Sugar leaves: a few small wedge-shaped protrusions ----
+    const leavesArr: Array<{
+      position: [number, number, number];
+      rotation: [number, number, number];
+      scale: number;
+    }> = [];
+    for (let i = 0; i < 8; i++) {
+      const seed = i * 13.7;
+      const theta = pseudoRandom(seed) * Math.PI * 2;
+      const phi = Math.acos(2 * (pseudoRandom(seed + 1) * 0.6 + 0.1) - 0.2);
+      const pos = budSurface(theta, phi, 1.0);
+
+      const dirLen = Math.sqrt(pos[0] ** 2 + pos[1] ** 2 + pos[2] ** 2);
+      let dx = pos[0] / dirLen;
+      let dy = pos[1] / dirLen + 0.1;
+      let dz = pos[2] / dirLen;
+      const nd = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      dx /= nd; dy /= nd; dz /= nd;
+
+      const up = new THREE.Vector3(0, 1, 0);
+      const dir = new THREE.Vector3(dx, dy, dz);
+      const quat = new THREE.Quaternion().setFromUnitVectors(up, dir);
+      const euler = new THREE.Euler().setFromQuaternion(quat);
+
+      const scale = 0.12 + pseudoRandom(seed + 2) * 0.08;
+      leavesArr.push({
+        position: [pos[0] + dx * 0.05, pos[1] + dy * 0.05, pos[2] + dz * 0.05],
+        rotation: [euler.x, euler.y, euler.z],
+        scale,
+      });
+    }
+
+    return {
+      mainGeometry: geo,
+      pistils: pistilsArr,
+      trichomes: trichomesArr,
+      leaves: leavesArr,
+    };
+  }, [tint, purpleHint]);
 
   useFrame((_, delta) => {
-    if (meshRef.current) {
-      meshRef.current.rotation.y += delta * 0.18;
+    if (groupRef.current) {
+      groupRef.current.rotation.y += delta * 0.16;
     }
   });
 
   return (
-    <group ref={meshRef}>
-      <mesh geometry={geometry}>
-        <meshStandardMaterial color={tint} roughness={0.65} metalness={0.05} />
+    <group ref={groupRef}>
+      {/* Main bud body with vertex colors */}
+      <mesh geometry={mainGeometry}>
+        <meshStandardMaterial
+          vertexColors
+          roughness={0.6}
+          metalness={0.0}
+        />
       </mesh>
-      <Trichomes />
+
+      {/* Sugar leaves */}
+      {leaves.map((l, i) => (
+        <mesh key={`l-${i}`} position={l.position} rotation={l.rotation} scale={l.scale}>
+          <coneGeometry args={[0.5, 1.5, 5]} />
+          <meshStandardMaterial color="#3d5028" roughness={0.7} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
+
+      {/* Pistils — orange-red hairs */}
+      {pistils.map((p, i) => (
+        <mesh key={`p-${i}`} position={p.position} rotation={p.rotation}>
+          <cylinderGeometry args={[0.003, 0.012, p.length, 6]} />
+          <meshStandardMaterial color={p.color} roughness={0.75} metalness={0.0} />
+        </mesh>
+      ))}
+
+      {/* Trichomes — frosty crystal sparkle */}
+      {trichomes.map((t, i) => (
+        <mesh key={`t-${i}`} position={t.position}>
+          <sphereGeometry args={[t.size, 8, 8]} />
+          <meshStandardMaterial
+            color="#fff8e0"
+            emissive="#fff4c8"
+            emissiveIntensity={0.45}
+            roughness={0.1}
+            metalness={0.6}
+          />
+        </mesh>
+      ))}
     </group>
   );
 }
 
-function Trichomes() {
-  const positions = useMemo(() => {
-    const pts: [number, number, number][] = [];
-    for (let i = 0; i < 120; i++) {
-      const seed = i * 2.7183;
-      const theta = pseudoRandom(seed) * Math.PI * 2;
-      const phi = Math.acos(2 * pseudoRandom(seed + 1) - 1);
-      const r = 1.1 + pseudoRandom(seed + 2) * 0.1;
-      pts.push([
-        r * Math.sin(phi) * Math.cos(theta),
-        r * Math.sin(phi) * Math.sin(theta),
-        r * Math.cos(phi),
-      ]);
-    }
-    return pts;
-  }, []);
-
-  return (
-    <>
-      {positions.map((pos, i) => (
-        <mesh key={i} position={pos}>
-          <sphereGeometry args={[0.022, 6, 6]} />
-          <meshStandardMaterial color="#f5e8b8" emissive="#f5e8b8" emissiveIntensity={0.35} roughness={0.3} />
-        </mesh>
-      ))}
-    </>
-  );
-}
-
 function BudViewer({ strain }: { strain: Strain }) {
-  const tint = strain.type === "indica" ? "#4a3855"
-    : strain.type === "sativa" ? "#4a6b3a"
-    : strain.type === "cbd" ? "#3a5a55"
-    : "#5a4a3a";
+  // Cannabis-realistic base greens with type variation
+  const tint =
+    strain.type === "indica" ? "#3d4628"
+    : strain.type === "sativa" ? "#556b34"
+    : strain.type === "cbd" ? "#637840"
+    : "#4a5a30"; // hybrid
+
+  // How much purple to mix into the body (Indica often has purple genetics)
+  const purpleHint = strain.type === "indica" ? 0.5 : 0;
 
   return (
-    <Canvas camera={{ position: [0, 0, 3.2], fov: 45 }} dpr={[1, 2]}>
-      <ambientLight intensity={0.45} />
-      <directionalLight position={[5, 5, 5]} intensity={1.2} />
-      <directionalLight position={[-5, -3, -5]} intensity={0.4} color="#aab8ff" />
-      <Bud tint={tint} />
+    <Canvas camera={{ position: [0, 0.1, 3.3], fov: 45 }} dpr={[1, 2]}>
+      {/* Main key light */}
+      <directionalLight position={[5, 6, 5]} intensity={1.6} color="#ffffff" />
+      {/* Cool rim light from behind/side */}
+      <directionalLight position={[-5, 2, -3]} intensity={0.55} color="#a8c4ff" />
+      {/* Warm fill from below */}
+      <directionalLight position={[0, -3, 4]} intensity={0.35} color="#ffd9a8" />
+      {/* Sparkle highlight */}
+      <pointLight position={[2.5, 2.5, 2]} intensity={0.5} color="#ffffff" distance={8} />
+      {/* Soft ambient */}
+      <ambientLight intensity={0.3} />
+
+      <Bud tint={tint} purpleHint={purpleHint} />
+
       <OrbitControls
         enableZoom={false}
         enablePan={false}
@@ -352,12 +518,13 @@ export default function Home() {
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         .modal-close { position: absolute; top: 24px; right: 24px; width: 40px; height: 40px; background: rgba(255,255,255,0.9); border: 1px solid var(--line); border-radius: 50%; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; z-index: 10; transition: all 0.2s; }
         .modal-close:hover { background: var(--ink); color: var(--cream); border-color: var(--ink); }
-        .modal-hero { height: 380px; position: relative; overflow: hidden; }
+        .modal-hero { height: 420px; position: relative; overflow: hidden; }
         .modal-hero canvas { display: block; }
+        .modal-hero-vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 55%, transparent 30%, rgba(0,0,0,0.45) 100%); pointer-events: none; z-index: 1; }
         .modal-hero-content { position: absolute; bottom: 24px; left: 40px; z-index: 2; pointer-events: none; }
         .modal-hint { position: absolute; bottom: 24px; right: 40px; z-index: 2; font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.55); pointer-events: none; }
         .modal-number { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: rgba(255,255,255,0.7); margin-bottom: 12px; }
-        .modal-name { font-family: var(--display); font-style: italic; font-weight: 300; font-size: 56px; line-height: 1; color: white; letter-spacing: -0.02em; font-variation-settings: "SOFT" 60; text-shadow: 0 2px 16px rgba(0,0,0,0.3); }
+        .modal-name { font-family: var(--display); font-style: italic; font-weight: 300; font-size: 56px; line-height: 1; color: white; letter-spacing: -0.02em; font-variation-settings: "SOFT" 60; text-shadow: 0 2px 16px rgba(0,0,0,0.4); }
         .modal-body { padding: 48px 40px; }
         .modal-section { margin-bottom: 40px; }
         .modal-section-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-mute); margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
@@ -506,6 +673,7 @@ export default function Home() {
             <button className="modal-close" onClick={() => setSelected(null)}>×</button>
             <div className="modal-hero" style={{ background: selected.color }}>
               <BudViewer strain={selected} />
+              <div className="modal-hero-vignette"></div>
               <div className="modal-hero-content">
                 <div className="modal-number">N° {String(selected.id).padStart(3, "0")} · {selected.typeLabel}</div>
                 <div className="modal-name">{selected.name}</div>
