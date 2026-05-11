@@ -1,6 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { OrbitControls } from "@react-three/drei";
+import * as THREE from "three";
 
 type Terpene = { name: string; aroma: string; value: number };
 type Strain = {
@@ -141,18 +144,124 @@ const strains: Strain[] = [
     effects: ["klar", "ruhig", "fokussiert", "schmerzlindernd"] },
 ];
 
-const patterns: Record<string, React.ReactNode> = {
-  indica: ( <svg className="strain-card-svg" viewBox="0 0 280 200" preserveAspectRatio="xMidYMid slice"><circle cx="60" cy="60" r="40" fill="rgba(255,255,255,0.15)"/><circle cx="180" cy="120" r="60" fill="rgba(255,255,255,0.08)"/><circle cx="120" cy="40" r="25" fill="rgba(255,255,255,0.1)"/></svg> ),
-  sativa: ( <svg className="strain-card-svg" viewBox="0 0 280 200" preserveAspectRatio="xMidYMid slice"><path d="M20 100 L60 60 L100 100 L60 140 Z" fill="rgba(255,255,255,0.12)"/><path d="M120 80 L180 40 L220 80 L180 120 Z" fill="rgba(255,255,255,0.08)"/></svg> ),
-  hybrid: ( <svg className="strain-card-svg" viewBox="0 0 280 200" preserveAspectRatio="xMidYMid slice"><rect x="40" y="40" width="60" height="60" fill="rgba(255,255,255,0.12)" transform="rotate(15 70 70)"/><rect x="140" y="80" width="80" height="80" fill="rgba(255,255,255,0.08)" transform="rotate(-10 180 120)"/></svg> ),
-  cbd: ( <svg className="strain-card-svg" viewBox="0 0 280 200" preserveAspectRatio="xMidYMid slice"><circle cx="80" cy="100" r="35" stroke="rgba(255,255,255,0.2)" strokeWidth="1" fill="none"/><circle cx="80" cy="100" r="55" stroke="rgba(255,255,255,0.12)" strokeWidth="1" fill="none"/><circle cx="180" cy="100" r="35" stroke="rgba(255,255,255,0.15)" strokeWidth="1" fill="none"/></svg> ),
-};
+function pseudoRandom(seed: number) {
+  const x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+}
+
+function Bud({ tint }: { tint: string }) {
+  const meshRef = useRef<THREE.Group>(null);
+
+  const geometry = useMemo(() => {
+    const geo = new THREE.IcosahedronGeometry(1, 5);
+    const positions = geo.attributes.position;
+
+    for (let i = 0; i < positions.count; i++) {
+      const x = positions.getX(i);
+      const y = positions.getY(i);
+      const z = positions.getZ(i);
+
+      const noise1 = Math.sin(x * 3.2) * Math.cos(y * 3.2) * Math.sin(z * 3.2) * 0.18;
+      const noise2 = Math.sin(x * 7) * Math.cos(y * 7) * 0.06;
+      const bumpiness = pseudoRandom(i * 12.9898) * 0.1;
+
+      const length = Math.sqrt(x * x + y * y + z * z);
+      const scale = (length + noise1 + noise2 + bumpiness) / length;
+
+      positions.setX(i, x * scale);
+      positions.setY(i, y * scale);
+      positions.setZ(i, z * scale);
+    }
+
+    geo.computeVertexNormals();
+    return geo;
+  }, []);
+
+  useFrame((_, delta) => {
+    if (meshRef.current) {
+      meshRef.current.rotation.y += delta * 0.18;
+    }
+  });
+
+  return (
+    <group ref={meshRef}>
+      <mesh geometry={geometry}>
+        <meshStandardMaterial color={tint} roughness={0.65} metalness={0.05} />
+      </mesh>
+      <Trichomes />
+    </group>
+  );
+}
+
+function Trichomes() {
+  const positions = useMemo(() => {
+    const pts: [number, number, number][] = [];
+    for (let i = 0; i < 120; i++) {
+      const seed = i * 2.7183;
+      const theta = pseudoRandom(seed) * Math.PI * 2;
+      const phi = Math.acos(2 * pseudoRandom(seed + 1) - 1);
+      const r = 1.1 + pseudoRandom(seed + 2) * 0.1;
+      pts.push([
+        r * Math.sin(phi) * Math.cos(theta),
+        r * Math.sin(phi) * Math.sin(theta),
+        r * Math.cos(phi),
+      ]);
+    }
+    return pts;
+  }, []);
+
+  return (
+    <>
+      {positions.map((pos, i) => (
+        <mesh key={i} position={pos}>
+          <sphereGeometry args={[0.022, 6, 6]} />
+          <meshStandardMaterial color="#f5e8b8" emissive="#f5e8b8" emissiveIntensity={0.35} roughness={0.3} />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
+function BudViewer({ strain }: { strain: Strain }) {
+  const tint = strain.type === "indica" ? "#4a3855"
+    : strain.type === "sativa" ? "#4a6b3a"
+    : strain.type === "cbd" ? "#3a5a55"
+    : "#5a4a3a";
+
+  return (
+    <Canvas camera={{ position: [0, 0, 3.2], fov: 45 }} dpr={[1, 2]}>
+      <ambientLight intensity={0.45} />
+      <directionalLight position={[5, 5, 5]} intensity={1.2} />
+      <directionalLight position={[-5, -3, -5]} intensity={0.4} color="#aab8ff" />
+      <Bud tint={tint} />
+      <OrbitControls
+        enableZoom={false}
+        enablePan={false}
+        rotateSpeed={0.8}
+      />
+    </Canvas>
+  );
+}
 
 export default function Home() {
   const [filter, setFilter] = useState<string>("all");
+  const [search, setSearch] = useState<string>("");
   const [selected, setSelected] = useState<Strain | null>(null);
 
-  const filtered = filter === "all" ? strains : strains.filter((s) => s.type === filter);
+  const filtered = strains.filter((s) => {
+    const matchesType = filter === "all" || s.type === filter;
+    if (!matchesType) return false;
+    if (search.trim() === "") return true;
+    const q = search.toLowerCase().trim();
+    return (
+      s.name.toLowerCase().includes(q) ||
+      s.genetics.toLowerCase().includes(q) ||
+      s.dominant.toLowerCase().includes(q) ||
+      s.typeLabel.toLowerCase().includes(q) ||
+      s.effects.some((e) => e.toLowerCase().includes(q)) ||
+      s.terpenes.some((t) => t.name.toLowerCase().includes(q))
+    );
+  });
 
   useEffect(() => {
     document.body.style.overflow = selected ? "hidden" : "";
@@ -201,26 +310,32 @@ export default function Home() {
         .hero-meta { margin-top: 48px; display: flex; gap: 64px; flex-wrap: wrap; padding-top: 32px; border-top: 1px solid var(--line); max-width: 720px; }
         .hero-meta-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-mute); }
         .hero-meta-value { font-family: var(--display); font-size: 22px; font-style: italic; }
-        .filter-section { padding: 32px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--paper); position: sticky; top: 0; z-index: 50; backdrop-filter: blur(8px); }
-        .filter-inner { display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; }
-        .filter-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .filter-section { padding: 24px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--paper); position: sticky; top: 0; z-index: 50; backdrop-filter: blur(8px); }
+        .filter-row { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; }
+        .search-wrap { flex: 1; position: relative; }
+        .search-input { width: 100%; padding: 12px 16px 12px 42px; background: var(--cream); border: 1px solid var(--line); border-radius: 100px; font-family: var(--sans); font-size: 14px; color: var(--ink); transition: all 0.2s ease; outline: none; }
+        .search-input:focus { border-color: var(--ink); background: white; }
+        .search-input::placeholder { color: var(--ink-mute); }
+        .search-icon { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--ink-mute); pointer-events: none; }
+        .filter-inner { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .filter-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .filter-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink-mute); margin-right: 4px; }
-        .filter-pill { padding: 8px 18px; background: transparent; border: 1px solid var(--line-strong); border-radius: 100px; font-family: var(--sans); font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor: pointer; transition: all 0.2s ease; }
+        .filter-pill { padding: 7px 16px; background: transparent; border: 1px solid var(--line-strong); border-radius: 100px; font-family: var(--sans); font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor: pointer; transition: all 0.2s ease; }
         .filter-pill:hover { border-color: var(--ink); color: var(--ink); }
         .filter-pill.active { background: var(--ink); border-color: var(--ink); color: var(--cream); }
-        .results-count { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; color: var(--ink-mute); text-transform: uppercase; }
+        .results-count { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; color: var(--ink-mute); text-transform: uppercase; white-space: nowrap; }
         .results-count strong { font-weight: 500; color: var(--ink); }
         .strains-section { padding: 64px 0 120px; }
+        .empty-state { text-align: center; padding: 80px 20px; font-family: var(--display); font-style: italic; font-size: 24px; color: var(--ink-mute); }
         .strain-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px 24px; }
         @media (max-width: 900px) { .strain-grid { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 600px) { .strain-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 600px) { .strain-grid { grid-template-columns: 1fr; } .filter-inner { flex-direction: column; align-items: flex-start; } }
         .strain-card { background: var(--paper); border: 1px solid var(--line); cursor: pointer; transition: all 0.35s cubic-bezier(0.2, 0.8, 0.2, 1); overflow: hidden; display: flex; flex-direction: column; }
         .strain-card:hover { transform: translateY(-4px); border-color: var(--line-strong); box-shadow: 0 20px 40px -20px rgba(26, 26, 24, 0.15); }
         .strain-card-visual { height: 200px; position: relative; overflow: hidden; }
         .strain-card-visual::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.12) 0%, transparent 50%), radial-gradient(circle at 70% 70%, rgba(0,0,0,0.15) 0%, transparent 60%); }
         .strain-card-number { position: absolute; top: 16px; left: 16px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; color: rgba(255,255,255,0.7); z-index: 2; }
         .strain-card-type-tag { position: absolute; bottom: 16px; left: 16px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,255,255,0.95); padding: 4px 10px; border: 1px solid rgba(255,255,255,0.3); border-radius: 100px; z-index: 2; background: rgba(0,0,0,0.15); backdrop-filter: blur(4px); }
-        .strain-card-svg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; opacity: 0.4; }
         .strain-card-body { padding: 24px 24px 28px; flex: 1; display: flex; flex-direction: column; }
         .strain-card-name { font-family: var(--display); font-size: 24px; line-height: 1.1; letter-spacing: -0.01em; margin-bottom: 4px; }
         .strain-card-genetics { font-family: var(--display); font-style: italic; font-size: 13px; color: var(--ink-mute); margin-bottom: 20px; font-weight: 300; }
@@ -237,10 +352,12 @@ export default function Home() {
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         .modal-close { position: absolute; top: 24px; right: 24px; width: 40px; height: 40px; background: rgba(255,255,255,0.9); border: 1px solid var(--line); border-radius: 50%; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; z-index: 10; transition: all 0.2s; }
         .modal-close:hover { background: var(--ink); color: var(--cream); border-color: var(--ink); }
-        .modal-hero { height: 240px; position: relative; overflow: hidden; }
-        .modal-hero-content { position: absolute; bottom: 32px; left: 40px; z-index: 2; }
+        .modal-hero { height: 380px; position: relative; overflow: hidden; }
+        .modal-hero canvas { display: block; }
+        .modal-hero-content { position: absolute; bottom: 24px; left: 40px; z-index: 2; pointer-events: none; }
+        .modal-hint { position: absolute; bottom: 24px; right: 40px; z-index: 2; font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.55); pointer-events: none; }
         .modal-number { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: rgba(255,255,255,0.7); margin-bottom: 12px; }
-        .modal-name { font-family: var(--display); font-style: italic; font-weight: 300; font-size: 56px; line-height: 1; color: white; letter-spacing: -0.02em; font-variation-settings: "SOFT" 60; }
+        .modal-name { font-family: var(--display); font-style: italic; font-weight: 300; font-size: 56px; line-height: 1; color: white; letter-spacing: -0.02em; font-variation-settings: "SOFT" 60; text-shadow: 0 2px 16px rgba(0,0,0,0.3); }
         .modal-body { padding: 48px 40px; }
         .modal-section { margin-bottom: 40px; }
         .modal-section-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-mute); margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
@@ -309,6 +426,21 @@ export default function Home() {
 
       <section className="filter-section" id="sortiment">
         <div className="container">
+          <div className="filter-row">
+            <div className="search-wrap">
+              <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="7"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input
+                type="text"
+                className="search-input"
+                placeholder="Suche nach Name, Terpen, Effekt..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
           <div className="filter-inner">
             <div className="filter-group">
               <span className="filter-label">Typ</span>
@@ -333,35 +465,38 @@ export default function Home() {
 
       <section className="strains-section">
         <div className="container">
-          <div className="strain-grid">
-            {filtered.map((s) => (
-              <div key={s.id} className="strain-card" onClick={() => setSelected(s)}>
-                <div className="strain-card-visual" style={{ background: s.color }}>
-                  {patterns[s.type]}
-                  <div className="strain-card-number">N° {String(s.id).padStart(3, "0")}</div>
-                  <div className="strain-card-type-tag">{s.typeLabel}</div>
-                </div>
-                <div className="strain-card-body">
-                  <div className="strain-card-name">{s.name}</div>
-                  <div className="strain-card-genetics">{s.genetics}</div>
-                  <div className="strain-card-stats">
-                    <div className="stat">
-                      <div className="stat-label">THC</div>
-                      <div className="stat-value">{s.thc}%</div>
+          {filtered.length === 0 ? (
+            <div className="empty-state">Keine Sorte gefunden — versuch einen anderen Suchbegriff.</div>
+          ) : (
+            <div className="strain-grid">
+              {filtered.map((s) => (
+                <div key={s.id} className="strain-card" onClick={() => setSelected(s)}>
+                  <div className="strain-card-visual" style={{ background: s.color }}>
+                    <div className="strain-card-number">N° {String(s.id).padStart(3, "0")}</div>
+                    <div className="strain-card-type-tag">{s.typeLabel}</div>
+                  </div>
+                  <div className="strain-card-body">
+                    <div className="strain-card-name">{s.name}</div>
+                    <div className="strain-card-genetics">{s.genetics}</div>
+                    <div className="strain-card-stats">
+                      <div className="stat">
+                        <div className="stat-label">THC</div>
+                        <div className="stat-value">{s.thc}%</div>
+                      </div>
+                      <div className="stat">
+                        <div className="stat-label">CBD</div>
+                        <div className="stat-value">{s.cbd}%</div>
+                      </div>
                     </div>
-                    <div className="stat">
-                      <div className="stat-label">CBD</div>
-                      <div className="stat-value">{s.cbd}%</div>
+                    <div className="strain-card-terpene">
+                      <span className="terpene-name">{s.dominant}</span>
+                      <div className="terpene-icon"></div>
                     </div>
                   </div>
-                  <div className="strain-card-terpene">
-                    <span className="terpene-name">{s.dominant}</span>
-                    <div className="terpene-icon"></div>
-                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -370,11 +505,12 @@ export default function Home() {
           <div className="modal">
             <button className="modal-close" onClick={() => setSelected(null)}>×</button>
             <div className="modal-hero" style={{ background: selected.color }}>
-              {patterns[selected.type]}
+              <BudViewer strain={selected} />
               <div className="modal-hero-content">
                 <div className="modal-number">N° {String(selected.id).padStart(3, "0")} · {selected.typeLabel}</div>
                 <div className="modal-name">{selected.name}</div>
               </div>
+              <div className="modal-hint">Klicken & ziehen zum Drehen</div>
             </div>
             <div className="modal-body">
               <div className="modal-section">
