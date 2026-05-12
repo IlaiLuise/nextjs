@@ -401,8 +401,8 @@ function getPhenotype(strain: Strain): Phenotype {
     pistilWhiteRatio: isOrange ? 0.05 + r(9) * 0.1 : 0.15 + r(9) * 0.2,
     pistilHue: 0.045 + r(10) * 0.05,
     pistilCurve: 0.55 + r(11) * 0.45,
-    trichomeCount: isWhite ? Math.floor(320 + r(12) * 120) : Math.floor(220 + r(12) * 100),  // boosted
-    trichomeSize: 0.014 + r(13) * 0.006,  // bigger
+    trichomeCount: isWhite ? Math.floor(420 + r(12) * 150) : Math.floor(300 + r(12) * 120),  // boosted for layered structure
+    trichomeSize: 0.014 + r(13) * 0.006,
     trichomeGlow: isWhite ? 0.85 + r(14) * 0.3 : 0.6 + r(14) * 0.3,
     baseGreen,
     darkGreen,
@@ -419,36 +419,61 @@ function getPhenotype(strain: Strain): Phenotype {
 
 // =================== INNER BUD CORE (hides gaps between calyces) ===================
 
+// Shared bud-shape profile: cylindrical with rounded ends (sin curve)
+// t: 0 (bottom) to 1 (top), returns normalized radius 0..1
+function budShapeRadiusAt(t: number, pheno: Phenotype): number {
+  const clamped = Math.max(0.001, Math.min(0.999, t));
+  const widthProfile = Math.sin(Math.PI * clamped);
+  // Lower pow = fatter middle (indica), higher pow = more tapered (sativa)
+  const fattness = pheno.type === "sativa" ? 0.7 : pheno.type === "indica" ? 0.4 : 0.52;
+  return Math.pow(widthProfile, fattness);
+}
+
 function buildInnerBudCore(pheno: Phenotype): THREE.BufferGeometry {
-  const geo = new THREE.IcosahedronGeometry(0.78, 4);
+  const geo = new THREE.IcosahedronGeometry(1, 4);
   const positions = geo.attributes.position;
   const colors: number[] = [];
+
+  const halfHeight = pheno.elongation;
+  const maxRadius = pheno.type === "indica" ? 0.78 : pheno.type === "sativa" ? 0.5 : 0.65;
 
   for (let i = 0; i < positions.count; i++) {
     let x = positions.getX(i);
     let y = positions.getY(i);
     let z = positions.getZ(i);
-    y *= pheno.elongation;
-    const yNorm = y / pheno.elongation;
-    const taperFactor = yNorm > 0 ? 1 - yNorm * pheno.taper : 1 + Math.abs(yNorm) * 0.06;
-    x *= taperFactor;
-    z *= taperFactor;
-    const lean = Math.sin(yNorm * 1.5 + pheno.seed) * pheno.asymmetry;
+
+    // Compute t (height 0-1)
+    const t = (y + 1) / 2;
+    const targetRadius = budShapeRadiusAt(t, pheno) * maxRadius;
+
+    // Scale xz to match cylindrical profile
+    const xzLen = Math.sqrt(x * x + z * z);
+    if (xzLen > 0.001) {
+      const factor = targetRadius / xzLen;
+      x *= factor;
+      z *= factor;
+    }
+
+    // Stretch Y to halfHeight
+    y = (t * 2 - 1) * halfHeight;
+
+    // Slight asymmetric lean
+    const lean = Math.sin(t * Math.PI * 1.5 + pheno.seed) * pheno.asymmetry * 0.4;
     x += lean * Math.cos(pheno.seed);
     z += lean * Math.sin(pheno.seed);
 
-    // Mild FBM displacement
-    const noise = fbm(x * 1.5, y * 1.1, z * 1.5, pheno.seed, 3) * 0.06;
+    // Mild surface noise
+    const noise = fbm(x * 2, y * 1.5, z * 2, pheno.seed, 3) * 0.05;
     const dist = Math.max(0.0001, Math.sqrt(x * x + y * y + z * z));
     const scale = (dist + noise) / dist;
     positions.setX(i, x * scale);
     positions.setY(i, y * scale);
     positions.setZ(i, z * scale);
 
-    // VERY dark color — this is the shadow that shows between calyces
+    // VERY dark — this is the shadow that shows between calyces
     const c = pheno.darkGreen.clone();
     const variation = pseudoRandom(i * 3.456 + pheno.seed);
-    c.multiplyScalar(0.35 + variation * 0.2); // 0.35-0.55 multiplier = much darker
+    c.multiplyScalar(0.32 + variation * 0.22);
     colors.push(c.r, c.g, c.b);
   }
 
@@ -525,73 +550,160 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
   const purpleColor = new THREE.Color("#3a1f48");
   const yellowGreen = new THREE.Color("#9aa648");
   const whiteish = new THREE.Color("#c8d4b8");
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
 
-  for (let i = 0; i < pheno.calyxCount; i++) {
-    const s = pheno.seed + i * 31.7;
-    const t = i / Math.max(1, pheno.calyxCount - 1);
+  const isIndica = pheno.type === "indica";
+  const isSativa = pheno.type === "sativa";
 
-    // Y in [-1, 1] (top to bottom of cluster) — slight top bias
-    let y = 1 - 2 * Math.pow(t, 1.15) + (pseudoRandom(s) - 0.5) * 0.1;
-    y = Math.max(-1, Math.min(1, y));
+  // Internode layers along Y axis — real bud structure
+  const numLayers = isIndica
+    ? 9 + Math.floor(pseudoRandom(pheno.seed + 100) * 3)   // 9-11 layers, dense
+    : isSativa
+    ? 14 + Math.floor(pseudoRandom(pheno.seed + 100) * 4)  // 14-17 layers, elongated
+    : 11 + Math.floor(pseudoRandom(pheno.seed + 100) * 3); // 11-13 layers
 
-    const baseR = Math.sqrt(Math.max(0, 1 - y * y));
-    const angle = goldenAngle * i + (pseudoRandom(s + 1) - 0.5) * 0.3;
+  const halfHeight = pheno.elongation;
+  const maxRadius = isIndica ? 0.92 : isSativa ? 0.6 : 0.78;
 
-    // Taper (narrower at top for sativa)
-    const taperFactor = y > 0 ? 1 - y * pheno.taper : 1 + Math.abs(y) * 0.05;
-    const rTapered = baseR * taperFactor;
-    const radiusVariation = 1 + (pseudoRandom(s + 2) - 0.5) * 0.1;
-
-    const x = Math.cos(angle) * rTapered * radiusVariation;
-    const z = Math.sin(angle) * rTapered * radiusVariation;
-    const yPos = y * pheno.elongation;
-
-    // Outward direction (radial, slightly upward biased)
-    const outDir = new THREE.Vector3(x, yPos * 0.4 + 0.08, z).normalize();
-
-    // RANDOM TILT — organic chaos (real buds aren't geometrically perfect)
-    const tempPerp = new THREE.Vector3(
-      pseudoRandom(s + 20) - 0.5,
-      pseudoRandom(s + 21) - 0.5,
-      pseudoRandom(s + 22) - 0.5
-    );
-    const tiltAxis = new THREE.Vector3().crossVectors(outDir, tempPerp).normalize();
-    const tiltAngle = pseudoRandom(s + 23) * 0.45; // up to ~26°
-    const tiltQ = new THREE.Quaternion().setFromAxisAngle(tiltAxis, tiltAngle);
-    const tiltedDir = outDir.clone().applyQuaternion(tiltQ);
-
-    // EXTREME size variation — top calyces big, bottom calyces small
-    const topBoost = y > 0 ? 1 + y * 0.5 : 1 - Math.abs(y) * 0.3;
-    const baseScale = (0.22 + pseudoRandom(s + 3) * 0.12) * topBoost; // 0.22-0.34 × topBoost
-    const scaleVar = pseudoRandom(s + 4);
-    const scaleXZ = baseScale * (0.8 + scaleVar * 0.35);
-    const scaleY = baseScale * (1.0 + pseudoRandom(s + 5) * 0.3);
-
-    // Color tint per calyx
-    let calyxColor = pheno.baseGreen.clone();
-    calyxColor.offsetHSL(
+  // Helper for color tinting (used by all calyces)
+  const computeColor = (s: number, layerT: number): THREE.Color => {
+    const c = pheno.baseGreen.clone();
+    c.offsetHSL(
       (pseudoRandom(s + 6) - 0.5) * 0.04,
       (pseudoRandom(s + 7) - 0.5) * 0.15,
       (pseudoRandom(s + 8) - 0.5) * 0.12
     );
     if (pheno.purpleHint > 0) {
       const purpleAmt = pheno.purpleHint * (0.3 + pseudoRandom(s + 9) * 0.7);
-      const heightBoost = y > 0.3 ? 1.5 : (y > -0.2 ? 0.9 : 0.4);
-      calyxColor.lerp(purpleColor, purpleAmt * 0.6 * heightBoost);
+      const heightBoost = layerT > 0.65 ? 1.5 : (layerT > 0.4 ? 0.9 : 0.4);
+      c.lerp(purpleColor, purpleAmt * 0.6 * heightBoost);
     }
     if (pheno.yellowHint > 0 && pseudoRandom(s + 10) > 0.55) {
-      calyxColor.lerp(yellowGreen, pheno.yellowHint * 0.4);
+      c.lerp(yellowGreen, pheno.yellowHint * 0.4);
     }
     if (pheno.whiteHint > 0 && pseudoRandom(s + 11) > 0.7) {
-      calyxColor.lerp(whiteish, pheno.whiteHint * 0.25);
+      c.lerp(whiteish, pheno.whiteHint * 0.25);
     }
     const lightness = 0.85 + pseudoRandom(s + 12) * 0.3;
-    calyxColor.multiplyScalar(lightness);
+    c.multiplyScalar(lightness);
+    return c;
+  };
 
+  // === MAIN LAYERED INTERNODE STRUCTURE ===
+  for (let layerIdx = 0; layerIdx < numLayers; layerIdx++) {
+    // layerT from 0.05 (just above bottom) to 0.95 (just below top tip)
+    const layerT = 0.05 + (layerIdx / Math.max(1, numLayers - 1)) * 0.88;
+
+    const widthFactor = budShapeRadiusAt(layerT, pheno);
+    const radiusAtY = widthFactor * maxRadius;
+    const yPos = (layerT * 2 - 1) * halfHeight;
+
+    // Calyces per layer: more where bud is wider (middle), fewer at ends
+    const layerCalyxCount = Math.max(4, Math.floor(5 + widthFactor * 7));
+
+    // Each layer rotates its spiral slightly for natural look
+    const layerRotation = layerIdx * 0.73 + pseudoRandom(pheno.seed + layerIdx) * 0.5;
+
+    for (let i = 0; i < layerCalyxCount; i++) {
+      const s = pheno.seed + layerIdx * 1000 + i * 7.31;
+
+      const baseAngle = (i / layerCalyxCount) * Math.PI * 2 + layerRotation;
+      const angle = baseAngle + (pseudoRandom(s) - 0.5) * 0.35;
+
+      const radiusVar = 1 + (pseudoRandom(s + 1) - 0.5) * 0.13;
+      const x = Math.cos(angle) * radiusAtY * radiusVar;
+      const z = Math.sin(angle) * radiusAtY * radiusVar;
+      const calyxY = yPos + (pseudoRandom(s + 2) - 0.5) * 0.12;
+
+      // UPWARD-POINTING orientation — top layers more vertical, bottom more outward
+      const upBias = 0.55 + layerT * 0.4; // 0.55 (bottom) → 0.95 (top)
+      const outBias = 1 - upBias;
+      const radialDir = new THREE.Vector3(x, 0, z).normalize();
+      const outDir = new THREE.Vector3(
+        radialDir.x * outBias,
+        upBias,
+        radialDir.z * outBias
+      ).normalize();
+
+      // Random tilt for organic chaos
+      const tempPerp = new THREE.Vector3(
+        pseudoRandom(s + 20) - 0.5,
+        pseudoRandom(s + 21) - 0.5,
+        pseudoRandom(s + 22) - 0.5
+      );
+      const tiltAxis = new THREE.Vector3().crossVectors(outDir, tempPerp).normalize();
+      const tiltAngle = pseudoRandom(s + 23) * 0.42;
+      const tiltQ = new THREE.Quaternion().setFromAxisAngle(tiltAxis, tiltAngle);
+      const tiltedDir = outDir.clone().applyQuaternion(tiltQ);
+
+      // Size: smaller in general, mild boost at top
+      const topBoost = layerT > 0.6 ? 1 + (layerT - 0.6) * 0.7 : 1;
+      const baseScale = (0.16 + pseudoRandom(s + 3) * 0.06) * topBoost;
+      const scaleVar = pseudoRandom(s + 4);
+      const scaleXZ = baseScale * (0.85 + scaleVar * 0.25);
+      const scaleY = baseScale * (1.15 + pseudoRandom(s + 5) * 0.35);
+
+      const calyxColor = computeColor(s, layerT);
+      const geometry = buildCalyxGeometry(s + 7000, calyxColor);
+
+      const position: [number, number, number] = [x, calyxY, z];
+      const scale: [number, number, number] = [scaleXZ, scaleY, scaleXZ];
+      const rotation = rotationFromDir(tiltedDir);
+
+      const transformMatrix = new THREE.Matrix4().compose(
+        new THREE.Vector3(...position),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
+        new THREE.Vector3(...scale)
+      );
+
+      calyces.push({
+        position,
+        scale,
+        rotation,
+        geometry,
+        worldCenter: new THREE.Vector3(...position),
+        worldOutDir: tiltedDir,
+        transformMatrix,
+        clusterY: layerT * 2 - 1,
+      });
+    }
+  }
+
+  // === TIP CLUSTER — dense cluster of upward-pointing calyces at the very top ===
+  const tipCount = isSativa ? 4 : 6;
+  for (let i = 0; i < tipCount; i++) {
+    const s = pheno.seed + i * 13.7 + 99000;
+    const angle = (i / tipCount) * Math.PI * 2;
+    const r = 0.05 + pseudoRandom(s) * 0.05;
+    const x = Math.cos(angle) * r;
+    const z = Math.sin(angle) * r;
+    const calyxY = halfHeight * (0.95 + pseudoRandom(s + 1) * 0.05);
+
+    // Almost straight up with tiny outward bias
+    const outDir = new THREE.Vector3(
+      Math.cos(angle) * 0.12,
+      0.99,
+      Math.sin(angle) * 0.12
+    ).normalize();
+
+    const tempPerp = new THREE.Vector3(
+      pseudoRandom(s + 20) - 0.5,
+      pseudoRandom(s + 21) - 0.5,
+      pseudoRandom(s + 22) - 0.5
+    );
+    const tiltAxis = new THREE.Vector3().crossVectors(outDir, tempPerp).normalize();
+    const tiltAngle = pseudoRandom(s + 23) * 0.3;
+    const tiltQ = new THREE.Quaternion().setFromAxisAngle(tiltAxis, tiltAngle);
+    const tiltedDir = outDir.clone().applyQuaternion(tiltQ);
+
+    // Tip calyces slightly bigger (prominent cola tip)
+    const baseScale = 0.19 + pseudoRandom(s + 3) * 0.05;
+    const scaleXZ = baseScale * 0.92;
+    const scaleY = baseScale * 1.3;
+
+    const calyxColor = computeColor(s, 0.95);
     const geometry = buildCalyxGeometry(s + 7000, calyxColor);
 
-    const position: [number, number, number] = [x, yPos, z];
+    const position: [number, number, number] = [x, calyxY, z];
     const scale: [number, number, number] = [scaleXZ, scaleY, scaleXZ];
     const rotation = rotationFromDir(tiltedDir);
 
@@ -609,7 +721,7 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
       worldCenter: new THREE.Vector3(...position),
       worldOutDir: tiltedDir,
       transformMatrix,
-      clusterY: y,
+      clusterY: 0.96,
     });
   }
 
@@ -929,10 +1041,10 @@ function Bud({ strain }: { strain: Strain }) {
         >
           <meshPhysicalMaterial
             vertexColors
-            roughness={0.38}
-            metalness={0.05}
-            clearcoat={0.55}
-            clearcoatRoughness={0.4}
+            roughness={0.58}
+            metalness={0.03}
+            clearcoat={0.22}
+            clearcoatRoughness={0.7}
           />
         </mesh>
       ))}
@@ -980,7 +1092,7 @@ function Bud({ strain }: { strain: Strain }) {
 
       {/* === TRICHOME STALKS === */}
       {features.trichomeStalks.length > 0 && (
-        <Instances limit={Math.max(500, features.trichomeStalks.length)} range={features.trichomeStalks.length}>
+        <Instances limit={Math.max(700, features.trichomeStalks.length)} range={features.trichomeStalks.length}>
           <coneGeometry args={[1, 1, 5]} />
           <meshStandardMaterial
             color="#f4ecc8"
@@ -997,7 +1109,7 @@ function Bud({ strain }: { strain: Strain }) {
 
       {/* === TRICHOME HEADS — bright polished resin look === */}
       {features.trichomeHeads.length > 0 && (
-        <Instances limit={Math.max(500, features.trichomeHeads.length)} range={features.trichomeHeads.length}>
+        <Instances limit={Math.max(700, features.trichomeHeads.length)} range={features.trichomeHeads.length}>
           <capsuleGeometry args={[1, 1.0, 3, 5]} />
           <meshPhysicalMaterial
             color="#fffaea"
