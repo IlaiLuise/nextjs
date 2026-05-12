@@ -892,6 +892,7 @@ type BudFeatures = {
   trichomeHeads: InstanceData[];
   leaves: LeafData[];
   trimLeaves: LeafData[];
+  fanLeaves: LeafData[];
 };
 
 function generateBudFeatures(pheno: Phenotype, calyces: CalyxData[]): BudFeatures {
@@ -1109,7 +1110,7 @@ function generateBudFeatures(pheno: Phenotype, calyces: CalyxData[]): BudFeature
     });
   }
 
-  return { mergedPistilGeometry, conePistilFallback, trichomeStalks, trichomeHeads, leaves, trimLeaves: generateTrimLeaves(pheno, calyces) };
+  return { mergedPistilGeometry, conePistilFallback, trichomeStalks, trichomeHeads, leaves, trimLeaves: generateTrimLeaves(pheno, calyces), fanLeaves: generateFanLeaves(pheno, calyces) };
 }
 
 // === LONG TRIM LEAVES — protruding sugar leaves between calyces (untrimmed look) ===
@@ -1171,6 +1172,71 @@ function generateTrimLeaves(pheno: Phenotype, calyces: CalyxData[]): LeafData[] 
   }
 
   return trimLeaves;
+}
+
+// === FAN LEAVES — large 5-finger cannabis leaves protruding from sides of bud (untrimmed) ===
+function generateFanLeaves(pheno: Phenotype, calyces: CalyxData[]): LeafData[] {
+  const fanLeaves: LeafData[] = [];
+
+  // 1-2 large fan leaves per bud
+  const fanLeafCount = 1 + Math.floor(pseudoRandom(pheno.seed + 70000) * 2);
+
+  // Pick from lower-to-middle calyces (fan leaves grow lower on the bud)
+  const lowerCalyces = calyces.filter((c) => c.clusterY > -0.7 && c.clusterY < 0.4);
+  if (lowerCalyces.length === 0) return fanLeaves;
+
+  for (let i = 0; i < fanLeafCount; i++) {
+    const sl = pheno.seed + i * 31.3 + 70000;
+    const calyx = lowerCalyces[Math.floor(pseudoRandom(sl) * lowerCalyces.length)];
+
+    // Position: at calyx base, offset outward
+    const localBase = new THREE.Vector3(
+      (pseudoRandom(sl + 1) - 0.5) * 0.5,
+      (-0.7 + pseudoRandom(sl + 2) * 0.4) * 1.3,
+      (pseudoRandom(sl + 3) - 0.5) * 0.5
+    );
+    const worldBase = localBase.clone().applyMatrix4(calyx.transformMatrix);
+
+    // Build orientation: tip points UP+OUTWARD, surface faces forward
+    let worldRadial = new THREE.Vector3(worldBase.x, 0, worldBase.z);
+    if (worldRadial.length() < 0.05) {
+      const ra = pseudoRandom(sl + 4) * Math.PI * 2;
+      worldRadial.set(Math.cos(ra), 0, Math.sin(ra));
+    }
+    worldRadial.normalize();
+
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    let localX = new THREE.Vector3().crossVectors(worldUp, worldRadial);
+    if (localX.length() < 0.01) localX.set(1, 0, 0);
+    localX.normalize();
+
+    // Fan leaves tilt MORE outward than trim leaves (more dramatic visibility)
+    const outwardTilt = 0.5 + pseudoRandom(sl + 5) * 0.35; // 28-49° outward
+    const tiltQ = new THREE.Quaternion().setFromAxisAngle(localX, outwardTilt);
+    const tiltedRadial = worldRadial.clone().applyQuaternion(tiltQ);
+    const tiltedY = worldUp.clone().applyQuaternion(tiltQ);
+
+    // Side tilt for natural variation
+    const sideTilt = (pseudoRandom(sl + 6) - 0.5) * 0.4;
+    const sideTiltQ = new THREE.Quaternion().setFromAxisAngle(tiltedY, sideTilt);
+    const finalRadial = tiltedRadial.clone().applyQuaternion(sideTiltQ);
+    const finalX = localX.clone().applyQuaternion(sideTiltQ);
+    const finalY = tiltedY.clone().applyQuaternion(sideTiltQ);
+
+    const rotMat = new THREE.Matrix4().makeBasis(finalX, finalY, finalRadial);
+    const euler = new THREE.Euler().setFromRotationMatrix(rotMat);
+
+    // Large scale — full fan leaves
+    const scale = 0.85 + pseudoRandom(sl + 7) * 0.45; // 0.85-1.3
+
+    fanLeaves.push({
+      position: [worldBase.x, worldBase.y, worldBase.z],
+      rotation: [euler.x, euler.y, euler.z],
+      scale,
+    });
+  }
+
+  return fanLeaves;
 }
 
 // =================== COMPONENTS ===================
@@ -1337,6 +1403,41 @@ function Bud({ strain }: { strain: Strain }) {
               clearcoatRoughness={0.45}
               emissive="#fff8d0"
               emissiveIntensity={isHeavyFrosted ? 0.18 : 0.06}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        );
+      })}
+
+      {/* === FAN LEAVES (large 5-finger leaves protruding outward from bud sides) === */}
+      {features.fanLeaves.map((l, i) => {
+        // Slightly darker green than calyces (older mature leaves)
+        const fanColor = pheno.baseGreen.clone()
+          .multiplyScalar(0.88)
+          .offsetHSL(
+            (pseudoRandom(i + pheno.seed + 80000) - 0.5) * 0.04,
+            (pseudoRandom(i + pheno.seed + 80001) - 0.5) * 0.1,
+            -0.02 + (pseudoRandom(i + pheno.seed + 80002) - 0.5) * 0.08
+          );
+        // Some fan leaves have light frost (~25% chance, less than trim leaves — these are older)
+        const isFrosted = pseudoRandom(i + pheno.seed + 80003) > 0.75;
+        if (isFrosted) fanColor.lerp(new THREE.Color("#d8d4b4"), 0.18);
+        return (
+          <mesh
+            key={`fan-${i}`}
+            position={l.position}
+            rotation={l.rotation}
+            scale={[l.scale, l.scale, l.scale]}
+          >
+            <shapeGeometry args={[leafShape]} />
+            <meshPhysicalMaterial
+              color={fanColor}
+              roughness={0.55}
+              metalness={0.04}
+              clearcoat={0.35}
+              clearcoatRoughness={0.55}
+              emissive="#fff8d0"
+              emissiveIntensity={isFrosted ? 0.1 : 0.03}
               side={THREE.DoubleSide}
             />
           </mesh>
