@@ -163,7 +163,6 @@ const strains: Strain[] = [
 
 // =================== DEFENSIVE WRAPPERS ===================
 
-// Catches any render error inside 3D scene and shows fallback
 class Bud3DErrorBoundary extends Component<
   { children: ReactNode; fallback: ReactNode },
   { hasError: boolean }
@@ -184,7 +183,6 @@ class Bud3DErrorBoundary extends Component<
   }
 }
 
-// Prevents SSR for content that uses browser-only APIs
 function ClientOnly({ children, fallback = null }: { children: ReactNode; fallback?: ReactNode }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -204,7 +202,6 @@ function smoothstep(t: number) {
   return t * t * (3 - 2 * t);
 }
 
-// 3D value noise — smooth interpolated random
 function valueNoise3D(x: number, y: number, z: number, seed: number): number {
   const ix = Math.floor(x);
   const iy = Math.floor(y);
@@ -215,10 +212,8 @@ function valueNoise3D(x: number, y: number, z: number, seed: number): number {
   const u = smoothstep(fx);
   const v = smoothstep(fy);
   const w = smoothstep(fz);
-
   const h = (cx: number, cy: number, cz: number) =>
     pseudoRandom(seed + cx * 73.7 + cy * 19.3 + cz * 137.1) * 2 - 1;
-
   const c000 = h(ix, iy, iz);
   const c100 = h(ix + 1, iy, iz);
   const c010 = h(ix, iy + 1, iz);
@@ -227,19 +222,15 @@ function valueNoise3D(x: number, y: number, z: number, seed: number): number {
   const c101 = h(ix + 1, iy, iz + 1);
   const c011 = h(ix, iy + 1, iz + 1);
   const c111 = h(ix + 1, iy + 1, iz + 1);
-
   const x00 = c000 * (1 - u) + c100 * u;
   const x10 = c010 * (1 - u) + c110 * u;
   const x01 = c001 * (1 - u) + c101 * u;
   const x11 = c011 * (1 - u) + c111 * u;
-
   const y0 = x00 * (1 - v) + x10 * v;
   const y1 = x01 * (1 - v) + x11 * v;
-
   return y0 * (1 - w) + y1 * w;
 }
 
-// FBM — ITERATIVE (loop, not recursive — stable)
 function fbm(x: number, y: number, z: number, seed: number, octaves = 3): number {
   let value = 0;
   let amplitude = 1;
@@ -254,7 +245,6 @@ function fbm(x: number, y: number, z: number, seed: number, octaves = 3): number
   return value / max;
 }
 
-// Robust geometry merger — defensive coding
 function safeMergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
   if (geos.length === 0) return null;
   try {
@@ -265,7 +255,6 @@ function safeMergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry
       totalVerts += g.attributes.position.count;
       totalIndices += g.index ? g.index.count : g.attributes.position.count;
     }
-
     if (totalVerts === 0) return null;
 
     const positions = new Float32Array(totalVerts * 3);
@@ -309,7 +298,6 @@ function safeMergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry
     merged.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
     merged.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     merged.setIndex(new THREE.BufferAttribute(indices, 1));
-
     return merged;
   } catch (e) {
     console.error("[safeMergeGeometries] Failed:", e);
@@ -327,7 +315,6 @@ function rotationFromDir(dir: THREE.Vector3): [number, number, number] {
 function makeCannabisLeafShape(): THREE.Shape {
   const shape = new THREE.Shape();
   shape.moveTo(0, 0);
-  // Right side — 4 fingers going up
   shape.bezierCurveTo(0.05, 0.05, 0.18, 0.08, 0.22, 0.18);
   shape.quadraticCurveTo(0.2, 0.22, 0.15, 0.22);
   shape.bezierCurveTo(0.2, 0.28, 0.3, 0.36, 0.32, 0.48);
@@ -335,7 +322,6 @@ function makeCannabisLeafShape(): THREE.Shape {
   shape.bezierCurveTo(0.22, 0.58, 0.22, 0.7, 0.18, 0.82);
   shape.quadraticCurveTo(0.13, 0.83, 0.09, 0.82);
   shape.bezierCurveTo(0.06, 0.88, 0.03, 0.95, 0, 1.0);
-  // Left side mirror
   shape.bezierCurveTo(-0.03, 0.95, -0.06, 0.88, -0.09, 0.82);
   shape.quadraticCurveTo(-0.13, 0.83, -0.18, 0.82);
   shape.bezierCurveTo(-0.22, 0.7, -0.22, 0.58, -0.22, 0.49);
@@ -364,12 +350,13 @@ type Phenotype = {
   trichomeSize: number;
   trichomeGlow: number;
   baseGreen: THREE.Color;
+  darkGreen: THREE.Color;
   bumpHighlight: THREE.Color;
   darkCrevice: THREE.Color;
   purpleHint: number;
   yellowHint: number;
   whiteHint: number;
-  subBudCount: number;
+  calyxCount: number;
   sugarLeafCount: number;
   seed: number;
 };
@@ -391,81 +378,51 @@ function getPhenotype(strain: Strain): Phenotype {
   const greenS = isSativa ? 0.55 : isCBD ? 0.42 : 0.5;
   const greenL = isSativa ? 0.33 : isIndica ? 0.22 : isCBD ? 0.36 : 0.28;
   const baseGreen = new THREE.Color().setHSL(greenH, greenS, greenL);
+  const darkGreen = new THREE.Color().setHSL(greenH, greenS * 1.1, Math.max(0.05, greenL - 0.12));
   const bumpHighlight = new THREE.Color().setHSL(greenH, greenS * 0.65, Math.min(0.62, greenL + 0.27));
   const darkCrevice = new THREE.Color().setHSL(greenH, greenS * 0.9, Math.max(0.05, greenL - 0.16));
 
-  const subBudCount = isIndica
-    ? 4 + Math.floor(r(30) * 2)
+  // Calyx count: indica = dense (more calyces), sativa = looser (fewer)
+  const calyxCount = isIndica
+    ? 30 + Math.floor(r(30) * 6)  // 30-36
     : isSativa
-    ? 2 + Math.floor(r(30) * 2)
-    : 3 + Math.floor(r(30) * 2);
+    ? 24 + Math.floor(r(30) * 4)  // 24-28
+    : 26 + Math.floor(r(30) * 6); // 26-32
 
   return {
     type: t,
-    elongation: isSativa ? 1.4 + r(1) * 0.3 : isIndica ? 1.05 + r(1) * 0.15 : 1.25 + r(1) * 0.2,
-    taper: isSativa ? 0.25 + r(2) * 0.08 : 0.16 + r(2) * 0.08,
+    elongation: isSativa ? 1.45 + r(1) * 0.3 : isIndica ? 1.05 + r(1) * 0.15 : 1.25 + r(1) * 0.2,
+    taper: isSativa ? 0.28 + r(2) * 0.08 : 0.16 + r(2) * 0.08,
     bumpStrength: 1.1 + r(4) * 0.4,
     asymmetry: 0.08 + r(5) * 0.1,
-    pistilCount: Math.floor(30 + r(6) * 25),
-    pistilLength: 0.2 + r(7) * 0.18,
+    pistilCount: Math.floor(35 + r(6) * 25),
+    pistilLength: 0.18 + r(7) * 0.15,
     pistilThickness: 0.005 + r(8) * 0.003,
     pistilWhiteRatio: isOrange ? 0.05 + r(9) * 0.1 : 0.15 + r(9) * 0.2,
     pistilHue: 0.045 + r(10) * 0.05,
-    pistilCurve: 0.5 + r(11) * 0.4,
-    trichomeCount: isWhite ? Math.floor(140 + r(12) * 80) : Math.floor(90 + r(12) * 60),
+    pistilCurve: 0.55 + r(11) * 0.45,
+    trichomeCount: isWhite ? Math.floor(220 + r(12) * 100) : Math.floor(140 + r(12) * 80),
     trichomeSize: 0.011 + r(13) * 0.005,
     trichomeGlow: isWhite ? 0.85 + r(14) * 0.3 : 0.6 + r(14) * 0.3,
     baseGreen,
+    darkGreen,
     bumpHighlight,
     darkCrevice,
     purpleHint: isPurple ? 0.6 + r(15) * 0.25 : isIndica ? 0.08 + r(15) * 0.12 : 0,
     yellowHint: isLemon ? 0.18 + r(16) * 0.1 : 0.04 + r(16) * 0.04,
     whiteHint: isWhite ? 0.22 + r(17) * 0.1 : 0,
-    subBudCount,
-    sugarLeafCount: Math.floor(3 + r(20) * 3),
+    calyxCount,
+    sugarLeafCount: Math.floor(4 + r(20) * 4),
     seed,
   };
 }
 
-// =================== GEOMETRY BUILDERS ===================
+// =================== INNER BUD CORE (hides gaps between calyces) ===================
 
-function budSurfacePoint(
-  theta: number,
-  phi: number,
-  pheno: Phenotype,
-  localSeed: number,
-  radialMultiplier = 1
-): [number, number, number] {
-  let x = Math.sin(phi) * Math.cos(theta);
-  let y = Math.cos(phi);
-  let z = Math.sin(phi) * Math.sin(theta);
-  y *= pheno.elongation;
-  const yNorm = y / pheno.elongation;
-  const taperFactor = yNorm > 0 ? 1 - yNorm * pheno.taper : 1 + Math.abs(yNorm) * 0.06;
-  x *= taperFactor;
-  z *= taperFactor;
-  const lean = Math.sin(yNorm * 1.5 + localSeed) * pheno.asymmetry;
-  x += lean * Math.cos(localSeed);
-  z += lean * Math.sin(localSeed);
-
-  const noise =
-    fbm(x * 1.3, y * 0.9, z * 1.3, localSeed, 3) * 0.14 +
-    fbm(x * 3.5, y * 2.5, z * 3.5, localSeed + 100, 2) * 0.06;
-  const totalBump = noise * pheno.bumpStrength;
-
-  const dist = Math.max(0.0001, Math.sqrt(x * x + y * y + z * z));
-  const newDist = (dist + totalBump) * radialMultiplier;
-  const scale = newDist / dist;
-  return [x * scale, y * scale, z * scale];
-}
-
-function buildBudGeometry(pheno: Phenotype, localSeed: number, detail: number = 5): THREE.BufferGeometry {
-  const geo = new THREE.IcosahedronGeometry(1, detail);
+function buildInnerBudCore(pheno: Phenotype): THREE.BufferGeometry {
+  const geo = new THREE.IcosahedronGeometry(0.78, 4);
   const positions = geo.attributes.position;
   const colors: number[] = [];
-  const purpleColor = new THREE.Color("#3a1f48");
-  const yellowGreen = new THREE.Color("#9aa648");
-  const whiteish = new THREE.Color("#c8d4b8");
 
   for (let i = 0; i < positions.count; i++) {
     let x = positions.getX(i);
@@ -476,54 +433,22 @@ function buildBudGeometry(pheno: Phenotype, localSeed: number, detail: number = 
     const taperFactor = yNorm > 0 ? 1 - yNorm * pheno.taper : 1 + Math.abs(yNorm) * 0.06;
     x *= taperFactor;
     z *= taperFactor;
-    const lean = Math.sin(yNorm * 1.5 + localSeed) * pheno.asymmetry;
-    x += lean * Math.cos(localSeed);
-    z += lean * Math.sin(localSeed);
+    const lean = Math.sin(yNorm * 1.5 + pheno.seed) * pheno.asymmetry;
+    x += lean * Math.cos(pheno.seed);
+    z += lean * Math.sin(pheno.seed);
 
-    const big = fbm(x * 1.3, y * 0.9, z * 1.3, localSeed, 3) * 0.14;
-    const med = fbm(x * 3.5, y * 2.5, z * 3.5, localSeed + 100, 3) * 0.07;
-    const fine = fbm(x * 9, y * 7, z * 9, localSeed + 200, 2) * 0.025;
-    const jitter = (pseudoRandom(i * 12.9898 + localSeed) - 0.5) * 0.025;
-    const totalBump = (big + med + fine + jitter) * pheno.bumpStrength;
-
+    // Mild FBM displacement (less than calyces — this is the BACKGROUND layer)
+    const noise = fbm(x * 1.5, y * 1.1, z * 1.5, pheno.seed, 3) * 0.06;
     const dist = Math.max(0.0001, Math.sqrt(x * x + y * y + z * z));
-    const scale = (dist + totalBump) / dist;
+    const scale = (dist + noise) / dist;
     positions.setX(i, x * scale);
     positions.setY(i, y * scale);
     positions.setZ(i, z * scale);
 
-    const c = pheno.baseGreen.clone();
-    const variation = pseudoRandom(i * 3.456 + localSeed);
-
-    const patchPattern = Math.sin(x * 1.6 + localSeed) * Math.cos(y * 1.4 + localSeed * 2) * Math.sin(z * 1.6 + localSeed * 3);
-    if (patchPattern > 0.5) {
-      c.lerp(yellowGreen, (patchPattern - 0.5) * 0.45);
-    } else if (patchPattern < -0.5) {
-      c.lerp(pheno.darkCrevice, (-patchPattern - 0.5) * 0.55);
-    }
-
-    if (totalBump < -0.015) {
-      const darkAmt = Math.min(1, (-totalBump - 0.015) * 8);
-      c.lerp(pheno.darkCrevice, darkAmt * 0.75);
-    }
-    if (totalBump > 0.025) {
-      const liftAmt = Math.min(1, (totalBump - 0.025) * 7);
-      c.lerp(pheno.bumpHighlight, liftAmt * 0.55);
-    }
-    if (pheno.purpleHint > 0) {
-      const purpleAmt = pheno.purpleHint * (0.3 + variation * 0.7);
-      const heightBoost = totalBump > 0.02 ? 1.35 : 0.65;
-      c.lerp(purpleColor, purpleAmt * 0.62 * heightBoost);
-    }
-    if (pheno.yellowHint > 0) {
-      c.lerp(yellowGreen, pheno.yellowHint * 0.42 * variation);
-    }
-    if (pheno.whiteHint > 0) {
-      c.lerp(whiteish, pheno.whiteHint * 0.3);
-    }
-
-    const lightness = 0.72 + pseudoRandom(i * 7.89 + localSeed) * 0.5;
-    c.multiplyScalar(lightness);
+    // Color: dark green (this is the SHADOW/BACKGROUND under calyces)
+    const c = pheno.darkGreen.clone();
+    const variation = pseudoRandom(i * 3.456 + pheno.seed);
+    c.multiplyScalar(0.65 + variation * 0.35);
     colors.push(c.r, c.g, c.b);
   }
 
@@ -532,8 +457,156 @@ function buildBudGeometry(pheno: Phenotype, localSeed: number, detail: number = 
   return geo;
 }
 
+// =================== CALYX BUILDERS ===================
+
+type CalyxData = {
+  position: [number, number, number];
+  scale: [number, number, number];
+  rotation: [number, number, number];
+  geometry: THREE.BufferGeometry;
+  worldCenter: THREE.Vector3;
+  worldOutDir: THREE.Vector3;
+  transformMatrix: THREE.Matrix4;
+  // y-position in [-1, 1] cluster space (for trichome density/pistil placement decisions)
+  clusterY: number;
+};
+
+function buildCalyxGeometry(seed: number, tintColor: THREE.Color): THREE.BufferGeometry {
+  const geo = new THREE.IcosahedronGeometry(1, 2); // 162 verts — lightweight
+  const positions = geo.attributes.position;
+  const colors: number[] = [];
+
+  for (let i = 0; i < positions.count; i++) {
+    let x = positions.getX(i);
+    let y = positions.getY(i);
+    let z = positions.getZ(i);
+
+    // Egg-shape: elongate towards +Y (the outward-facing tip), narrower at tip
+    y *= 1.3;
+    const yNorm = y / 1.3;
+    if (yNorm > 0.2) {
+      const taper = 1 - (yNorm - 0.2) * 0.45;
+      x *= taper;
+      z *= taper;
+    } else if (yNorm < -0.3) {
+      // Slightly wider at base
+      const widen = 1 + (yNorm + 0.3) * (yNorm + 0.3) * 0.15;
+      x *= widen;
+      z *= widen;
+    }
+
+    // Surface noise — subtle, gives each calyx individual character
+    const angle = Math.atan2(z, x);
+    const noise = Math.sin(angle * 5 + y * 3 + seed) * 0.04
+                + Math.cos(angle * 7 - y * 5 + seed * 2) * 0.025
+                + (pseudoRandom(seed + i * 7.3) - 0.5) * 0.025;
+
+    const dist = Math.max(0.0001, Math.sqrt(x * x + y * y + z * z));
+    const scale = (dist + noise) / dist;
+    positions.setX(i, x * scale);
+    positions.setY(i, y * scale);
+    positions.setZ(i, z * scale);
+
+    // Vertex color: darker at base (towards bud center), lighter at tip
+    const yPos = positions.getY(i);
+    const shadeFactor = 0.72 + ((yPos + 1.3) / 2.6) * 0.55;
+    colors.push(tintColor.r * shadeFactor, tintColor.g * shadeFactor, tintColor.b * shadeFactor);
+  }
+
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
+  const calyces: CalyxData[] = [];
+  const purpleColor = new THREE.Color("#3a1f48");
+  const yellowGreen = new THREE.Color("#9aa648");
+  const whiteish = new THREE.Color("#c8d4b8");
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+
+  for (let i = 0; i < pheno.calyxCount; i++) {
+    const s = pheno.seed + i * 31.7;
+    const t = i / Math.max(1, pheno.calyxCount - 1);
+
+    // Y in [-1, 1] (top to bottom of cluster)
+    let y = 1 - 2 * t + (pseudoRandom(s) - 0.5) * 0.1;
+    y = Math.max(-1, Math.min(1, y));
+
+    const baseR = Math.sqrt(Math.max(0, 1 - y * y));
+    const angle = goldenAngle * i + (pseudoRandom(s + 1) - 0.5) * 0.3;
+
+    // Taper (narrower at top for sativa)
+    const taperFactor = y > 0 ? 1 - y * pheno.taper : 1 + Math.abs(y) * 0.05;
+    const rTapered = baseR * taperFactor;
+    const radiusVariation = 1 + (pseudoRandom(s + 2) - 0.5) * 0.1;
+
+    const x = Math.cos(angle) * rTapered * radiusVariation;
+    const z = Math.sin(angle) * rTapered * radiusVariation;
+    const yPos = y * pheno.elongation;
+
+    // Outward direction (Y of calyx points away from bud center, biased upward)
+    const outDir = new THREE.Vector3(x, yPos * 0.45 + 0.08, z).normalize();
+
+    // Calyx size — larger at top (real cola tip has bigger calyces)
+    const topBoost = y > 0 ? 1 + y * 0.22 : 1 - Math.abs(y) * 0.12;
+    const baseScale = (0.24 + pseudoRandom(s + 3) * 0.08) * topBoost;
+    const scaleVar = pseudoRandom(s + 4);
+    const scaleXZ = baseScale * (0.85 + scaleVar * 0.25);
+    const scaleY = baseScale * (1.0 + pseudoRandom(s + 5) * 0.3);
+
+    // Color tint per calyx
+    let calyxColor = pheno.baseGreen.clone();
+    calyxColor.offsetHSL(
+      (pseudoRandom(s + 6) - 0.5) * 0.04,
+      (pseudoRandom(s + 7) - 0.5) * 0.15,
+      (pseudoRandom(s + 8) - 0.5) * 0.12
+    );
+    if (pheno.purpleHint > 0) {
+      const purpleAmt = pheno.purpleHint * (0.3 + pseudoRandom(s + 9) * 0.7);
+      const heightBoost = y > 0.3 ? 1.4 : (y > -0.2 ? 0.8 : 0.4);
+      calyxColor.lerp(purpleColor, purpleAmt * 0.55 * heightBoost);
+    }
+    if (pheno.yellowHint > 0 && pseudoRandom(s + 10) > 0.55) {
+      calyxColor.lerp(yellowGreen, pheno.yellowHint * 0.4);
+    }
+    if (pheno.whiteHint > 0 && pseudoRandom(s + 11) > 0.7) {
+      calyxColor.lerp(whiteish, pheno.whiteHint * 0.25);
+    }
+    const lightness = 0.85 + pseudoRandom(s + 12) * 0.3;
+    calyxColor.multiplyScalar(lightness);
+
+    const geometry = buildCalyxGeometry(s + 7000, calyxColor);
+
+    const position: [number, number, number] = [x, yPos, z];
+    const scale: [number, number, number] = [scaleXZ, scaleY, scaleXZ];
+    const rotation = rotationFromDir(outDir);
+
+    const transformMatrix = new THREE.Matrix4().compose(
+      new THREE.Vector3(...position),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
+      new THREE.Vector3(...scale)
+    );
+
+    calyces.push({
+      position,
+      scale,
+      rotation,
+      geometry,
+      worldCenter: new THREE.Vector3(...position),
+      worldOutDir: outDir,
+      transformMatrix,
+      clusterY: y,
+    });
+  }
+
+  return calyces;
+}
+
+// =================== WORLD-SPACE FEATURE GENERATORS ===================
+
 function buildCurvedPistilGeometry(
-  surfacePos: [number, number, number],
+  surfacePos: THREE.Vector3,
   outDirection: THREE.Vector3,
   length: number,
   thickness: number,
@@ -541,7 +614,6 @@ function buildCurvedPistilGeometry(
   upBias: number,
   seed: number
 ): THREE.BufferGeometry {
-  const start = new THREE.Vector3(...surfacePos);
   const tempSide = new THREE.Vector3(
     pseudoRandom(seed * 7) - 0.5,
     pseudoRandom(seed * 11) - 0.5,
@@ -549,22 +621,20 @@ function buildCurvedPistilGeometry(
   );
   const side = new THREE.Vector3().crossVectors(outDirection, tempSide).normalize();
 
-  const p0 = start.clone();
-  const p1 = start.clone().add(outDirection.clone().multiplyScalar(length * 0.3));
-  const p2 = start.clone()
+  const p0 = surfacePos.clone();
+  const p1 = surfacePos.clone().add(outDirection.clone().multiplyScalar(length * 0.3));
+  const p2 = surfacePos.clone()
     .add(outDirection.clone().multiplyScalar(length * 0.6))
     .add(side.clone().multiplyScalar(curveAmount * length * 0.3))
-    .add(new THREE.Vector3(0, length * 0.1, 0));
-  const p3 = start.clone()
-    .add(outDirection.clone().multiplyScalar(length * 0.92))
-    .add(side.clone().multiplyScalar(curveAmount * length * 0.55))
+    .add(new THREE.Vector3(0, length * 0.12, 0));
+  const p3 = surfacePos.clone()
+    .add(outDirection.clone().multiplyScalar(length * 0.9))
+    .add(side.clone().multiplyScalar(curveAmount * length * 0.5))
     .add(new THREE.Vector3(0, length * upBias, 0));
 
   const curve = new THREE.CatmullRomCurve3([p0, p1, p2, p3]);
   return new THREE.TubeGeometry(curve, 8, thickness, 5, false);
 }
-
-// =================== SUB-BUD CLUSTER ===================
 
 type InstanceData = {
   position: [number, number, number];
@@ -579,62 +649,70 @@ type LeafData = {
   scale: number;
 };
 
-type SubBudData = {
-  position: [number, number, number];
-  scale: [number, number, number];
-  rotation: [number, number, number];
-  geometry: THREE.BufferGeometry;
+type BudFeatures = {
   mergedPistilGeometry: THREE.BufferGeometry | null;
   conePistilFallback: InstanceData[];
   trichomeStalks: InstanceData[];
   trichomeHeads: InstanceData[];
   leaves: LeafData[];
-  greenTint: THREE.Color;
 };
 
-function generateSubBudFeatures(
-  pheno: Phenotype,
-  localSeed: number,
-  pistilCount: number,
-  trichomeCount: number,
-  leafCount: number
-) {
-  // === PISTILS — try TubeGeometry merged, fallback to cone instances ===
+function generateBudFeatures(pheno: Phenotype, calyces: CalyxData[]): BudFeatures {
   const pistilTubes: THREE.BufferGeometry[] = [];
   const conePistilFallback: InstanceData[] = [];
+  const trichomeStalks: InstanceData[] = [];
+  const trichomeHeads: InstanceData[] = [];
+  const leaves: LeafData[] = [];
 
-  for (let i = 0; i < pistilCount; i++) {
-    const s = localSeed + i * 7.89;
-    const theta = pseudoRandom(s) * Math.PI * 2;
-    const phi = Math.acos(2 * (pseudoRandom(s + 1) * 0.6 + 0.05) - 0.2);
-    const surfacePos = budSurfacePoint(theta, phi, pheno, localSeed, 0.98);
-    const surfVec = new THREE.Vector3(...surfacePos);
-    const outDir = new THREE.Vector3(surfVec.x, surfVec.y + 0.2, surfVec.z).normalize();
+  // === PISTILS: only from top quarter of cluster, emerging between calyces ===
+  // Filter to upper calyces only (clusterY > 0.2)
+  const upperCalyces = calyces.filter((c) => c.clusterY > 0.2);
+  const pistilSampleCount = Math.min(pheno.pistilCount, upperCalyces.length * 3);
 
-    const length = pheno.pistilLength * (0.55 + pseudoRandom(s + 2) * 0.8);
-    const thickness = pheno.pistilThickness * (0.7 + pseudoRandom(s + 3) * 0.6);
-    const curve = pheno.pistilCurve * (0.4 + pseudoRandom(s + 4) * 1.2);
-    const upBias = 0.25 + pseudoRandom(s + 5) * 0.25;
+  for (let i = 0; i < pistilSampleCount; i++) {
+    const s = pheno.seed + i * 7.89 + 5000;
+    // Pick a random upper calyx as the pistil's origin
+    const calyx = upperCalyces[Math.floor(pseudoRandom(s) * upperCalyces.length)];
+    if (!calyx) continue;
 
-    // Color buckets
-    const t = pseudoRandom(s + 7);
+    // Pistil emerges from near the TIP of the calyx (the outward-pointing end)
+    // In calyx local space, tip is around (0, 1, 0). Slight randomness.
+    const tipLocalY = 0.9 + pseudoRandom(s + 1) * 0.3;
+    const tipLocalX = (pseudoRandom(s + 2) - 0.5) * 0.3;
+    const tipLocalZ = (pseudoRandom(s + 3) - 0.5) * 0.3;
+    const localTip = new THREE.Vector3(tipLocalX, tipLocalY, tipLocalZ);
+    const worldTip = localTip.clone().applyMatrix4(calyx.transformMatrix);
+
+    // Outward direction: calyx's outward direction + upward bias
+    const outDir = new THREE.Vector3(
+      calyx.worldOutDir.x * 0.6,
+      calyx.worldOutDir.y * 0.5 + 0.7, // strong upward bias
+      calyx.worldOutDir.z * 0.6
+    ).normalize();
+
+    const length = pheno.pistilLength * (0.55 + pseudoRandom(s + 4) * 0.7);
+    const thickness = pheno.pistilThickness * (0.7 + pseudoRandom(s + 5) * 0.6);
+    const curve = pheno.pistilCurve * (0.4 + pseudoRandom(s + 6) * 1.0);
+    const upBias = 0.3 + pseudoRandom(s + 7) * 0.3;
+
+    // Color bucket (pistil color variation)
+    const t = pseudoRandom(s + 8);
     let color: THREE.Color;
     if (t < pheno.pistilWhiteRatio) {
       color = new THREE.Color().setHSL(0.13, 0.18, 0.86);
     } else if (t < pheno.pistilWhiteRatio + 0.45) {
-      const hue = pheno.pistilHue + 0.015 + (pseudoRandom(s + 8) - 0.5) * 0.02;
+      const hue = pheno.pistilHue + 0.015 + (pseudoRandom(s + 9) - 0.5) * 0.02;
       color = new THREE.Color().setHSL(hue, 0.78, 0.55);
     } else if (t < pheno.pistilWhiteRatio + 0.85) {
-      const hue = pheno.pistilHue + (pseudoRandom(s + 9) - 0.5) * 0.025;
+      const hue = pheno.pistilHue + (pseudoRandom(s + 10) - 0.5) * 0.025;
       color = new THREE.Color().setHSL(hue, 0.85, 0.42);
     } else {
-      const hue = pheno.pistilHue - 0.015 + (pseudoRandom(s + 10) - 0.5) * 0.02;
+      const hue = pheno.pistilHue - 0.015 + (pseudoRandom(s + 11) - 0.5) * 0.02;
       color = new THREE.Color().setHSL(hue, 0.88, 0.3);
     }
 
-    // Try to build TubeGeometry
     try {
-      const tube = buildCurvedPistilGeometry(surfacePos, outDir, length, thickness, curve, upBias, s);
+      const tube = buildCurvedPistilGeometry(worldTip, outDir, length, thickness, curve, upBias, s);
       const vCount = tube.attributes.position.count;
       const colorArr = new Float32Array(vCount * 3);
       for (let v = 0; v < vCount; v++) {
@@ -645,102 +723,124 @@ function generateSubBudFeatures(
       tube.setAttribute("color", new THREE.BufferAttribute(colorArr, 3));
       pistilTubes.push(tube);
     } catch (e) {
-      console.warn("[Pistil] TubeGeometry build failed, using cone fallback:", e);
+      // Fallback handled below
     }
 
-    // Always also build cone fallback data (used if merge fails)
-    const tiltAxis = new THREE.Vector3(
-      pseudoRandom(s + 11) - 0.5,
-      0,
-      pseudoRandom(s + 12) - 0.5
-    ).normalize();
-    const tiltAngle = (pseudoRandom(s + 13) - 0.5) * 0.6;
-    const tiltQ = new THREE.Quaternion().setFromAxisAngle(tiltAxis, tiltAngle);
-    const tiltedDir = outDir.clone().applyQuaternion(tiltQ);
-    const cx = surfVec.x + tiltedDir.x * length * 0.5;
-    const cy = surfVec.y + tiltedDir.y * length * 0.5;
-    const cz = surfVec.z + tiltedDir.z * length * 0.5;
+    // Cone fallback (always built for safety)
+    const cx = worldTip.x + outDir.x * length * 0.5;
+    const cy = worldTip.y + outDir.y * length * 0.5;
+    const cz = worldTip.z + outDir.z * length * 0.5;
     conePistilFallback.push({
       position: [cx, cy, cz],
-      rotation: rotationFromDir(tiltedDir),
+      rotation: rotationFromDir(outDir),
       scale: [thickness, length, thickness],
       color,
     });
   }
 
-  // Try to merge tubes; if merge fails, mergedPistilGeometry will be null and cone fallback kicks in
   const mergedPistilGeometry = pistilTubes.length > 0 ? safeMergeGeometries(pistilTubes) : null;
 
-  // === TRICHOMES — tangential (lying along surface) ===
-  const trichomeStalks: InstanceData[] = [];
-  const trichomeHeads: InstanceData[] = [];
-  for (let i = 0; i < trichomeCount; i++) {
-    const s = localSeed + i * 2.7183 + 1000;
-    const theta = pseudoRandom(s) * Math.PI * 2;
-    const phi = Math.acos(2 * pseudoRandom(s + 1) - 1);
-    const surfacePos = budSurfacePoint(theta, phi, pheno, localSeed, 1.0);
-    const surfVec = new THREE.Vector3(...surfacePos);
-    const outDir = surfVec.clone().normalize();
+  // === TRICHOMES: distributed across ALL calyces' surfaces ===
+  // For each calyx, sample N random points on its surface and emit trichome there
+  const trichomesPerCalyx = Math.max(3, Math.floor(pheno.trichomeCount / calyces.length));
 
-    const tempT = new THREE.Vector3(
-      pseudoRandom(s + 2) - 0.5,
-      pseudoRandom(s + 3) - 0.5,
-      pseudoRandom(s + 4) - 0.5
-    );
-    const tangent = new THREE.Vector3().crossVectors(outDir, tempT).normalize();
-    const tiltAmount = 0.7 + pseudoRandom(s + 5) * 0.7;
-    const tiltQ = new THREE.Quaternion().setFromAxisAngle(tangent, tiltAmount);
-    const trichDir = outDir.clone().applyQuaternion(tiltQ);
+  for (let cIdx = 0; cIdx < calyces.length; cIdx++) {
+    const calyx = calyces[cIdx];
+    for (let i = 0; i < trichomesPerCalyx; i++) {
+      const s = pheno.seed + cIdx * 1000 + i * 2.7183 + 10000;
 
-    const stalkLength = pheno.trichomeSize * (1.0 + pseudoRandom(s + 6) * 0.5);
-    const stalkThickness = pheno.trichomeSize * 0.3;
-    const headSize = pheno.trichomeSize * (0.65 + pseudoRandom(s + 7) * 0.35);
+      // Random point on unit sphere (calyx local space)
+      const theta = pseudoRandom(s) * Math.PI * 2;
+      // Bias toward outward-facing surface (positive Y in calyx local space)
+      const cosPhi = pseudoRandom(s + 1) * 1.5 - 0.5;
+      const phi = Math.acos(Math.max(-1, Math.min(1, cosPhi)));
+      const localX = Math.sin(phi) * Math.cos(theta);
+      const localY = Math.cos(phi);
+      const localZ = Math.sin(phi) * Math.sin(theta);
 
-    trichomeStalks.push({
-      position: [
-        surfVec.x + trichDir.x * stalkLength * 0.5,
-        surfVec.y + trichDir.y * stalkLength * 0.5,
-        surfVec.z + trichDir.z * stalkLength * 0.5,
-      ],
-      rotation: rotationFromDir(trichDir),
-      scale: [stalkThickness, stalkLength, stalkThickness],
-    });
+      // Transform to world space
+      const localSurface = new THREE.Vector3(localX, localY * 1.3, localZ); // account for egg-shape
+      const worldSurface = localSurface.clone().applyMatrix4(calyx.transformMatrix);
 
-    trichomeHeads.push({
-      position: [
-        surfVec.x + trichDir.x * (stalkLength + headSize * 0.5),
-        surfVec.y + trichDir.y * (stalkLength + headSize * 0.5),
-        surfVec.z + trichDir.z * (stalkLength + headSize * 0.5),
-      ],
-      rotation: rotationFromDir(trichDir),
-      scale: [headSize, headSize * 1.4, headSize],
-    });
+      // Outward direction in world space (calyx normal at this point)
+      const worldNormal = localSurface.clone().normalize()
+        .applyMatrix3(new THREE.Matrix3().setFromMatrix4(calyx.transformMatrix))
+        .normalize();
+
+      // Tangential tilt (trichomes lie along surface)
+      const tempT = new THREE.Vector3(
+        pseudoRandom(s + 2) - 0.5,
+        pseudoRandom(s + 3) - 0.5,
+        pseudoRandom(s + 4) - 0.5
+      );
+      const tangent = new THREE.Vector3().crossVectors(worldNormal, tempT).normalize();
+      const tiltAmount = 0.6 + pseudoRandom(s + 5) * 0.7;
+      const tiltQ = new THREE.Quaternion().setFromAxisAngle(tangent, tiltAmount);
+      const trichDir = worldNormal.clone().applyQuaternion(tiltQ);
+
+      const stalkLength = pheno.trichomeSize * (1.0 + pseudoRandom(s + 6) * 0.5);
+      const stalkThickness = pheno.trichomeSize * 0.3;
+      const headSize = pheno.trichomeSize * (0.7 + pseudoRandom(s + 7) * 0.35);
+
+      trichomeStalks.push({
+        position: [
+          worldSurface.x + trichDir.x * stalkLength * 0.5,
+          worldSurface.y + trichDir.y * stalkLength * 0.5,
+          worldSurface.z + trichDir.z * stalkLength * 0.5,
+        ],
+        rotation: rotationFromDir(trichDir),
+        scale: [stalkThickness, stalkLength, stalkThickness],
+      });
+
+      trichomeHeads.push({
+        position: [
+          worldSurface.x + trichDir.x * (stalkLength + headSize * 0.5),
+          worldSurface.y + trichDir.y * (stalkLength + headSize * 0.5),
+          worldSurface.z + trichDir.z * (stalkLength + headSize * 0.5),
+        ],
+        rotation: rotationFromDir(trichDir),
+        scale: [headSize, headSize * 1.4, headSize],
+      });
+    }
   }
 
-  // === SUGAR LEAVES — flat on surface (5-finger cannabis shape) ===
-  const leaves: LeafData[] = [];
-  for (let i = 0; i < leafCount; i++) {
-    const sl = localSeed + i * 13.7 + 2000;
-    const theta = pseudoRandom(sl) * Math.PI * 2;
-    const phi = Math.acos(2 * (pseudoRandom(sl + 1) * 0.6 + 0.15) - 0.2);
-    const pos = budSurfacePoint(theta, phi, pheno, localSeed, 1.0);
-    const surfVec = new THREE.Vector3(...pos);
-    const outDir = surfVec.clone().normalize();
+  // === SUGAR LEAVES: small leaves embedded between calyces in mid-cluster ===
+  // Pick random calyces from middle region (clusterY between -0.3 and 0.7)
+  const midCalyces = calyces.filter((c) => c.clusterY > -0.3 && c.clusterY < 0.7);
+
+  for (let i = 0; i < pheno.sugarLeafCount; i++) {
+    const sl = pheno.seed + i * 13.7 + 20000;
+    if (midCalyces.length === 0) break;
+    const calyx = midCalyces[Math.floor(pseudoRandom(sl) * midCalyces.length)];
+
+    // Leaf positioned at calyx base (negative Y in calyx local space)
+    const baseLocalY = -0.4 + pseudoRandom(sl + 1) * 0.5;
+    const baseLocalX = (pseudoRandom(sl + 2) - 0.5) * 0.6;
+    const baseLocalZ = (pseudoRandom(sl + 3) - 0.5) * 0.6;
+    const localBase = new THREE.Vector3(baseLocalX, baseLocalY * 1.3, baseLocalZ);
+    const worldBase = localBase.clone().applyMatrix4(calyx.transformMatrix);
+
+    // Leaf direction: outward from calyx but more sideways
+    const sideOffset = new THREE.Vector3(baseLocalX, 0, baseLocalZ).normalize();
+    const worldSide = sideOffset.clone()
+      .applyMatrix3(new THREE.Matrix3().setFromMatrix4(calyx.transformMatrix))
+      .normalize();
+
+    // Leaf normal (back of leaf faces outward)
+    const leafNormal = worldSide.clone().multiplyScalar(0.7)
+      .add(calyx.worldOutDir.clone().multiplyScalar(0.3))
+      .normalize();
 
     const defaultNormal = new THREE.Vector3(0, 0, 1);
-    const alignQ = new THREE.Quaternion().setFromUnitVectors(defaultNormal, outDir);
-    const spinAngle = pseudoRandom(sl + 2) * Math.PI * 2;
-    const spinQ = new THREE.Quaternion().setFromAxisAngle(outDir, spinAngle);
+    const alignQ = new THREE.Quaternion().setFromUnitVectors(defaultNormal, leafNormal);
+    const spinAngle = pseudoRandom(sl + 4) * Math.PI * 2;
+    const spinQ = new THREE.Quaternion().setFromAxisAngle(leafNormal, spinAngle);
     const finalQ = spinQ.multiply(alignQ);
     const euler = new THREE.Euler().setFromQuaternion(finalQ);
-    const scl = 0.16 + pseudoRandom(sl + 3) * 0.1;
+    const scl = 0.18 + pseudoRandom(sl + 5) * 0.12;
 
     leaves.push({
-      position: [
-        surfVec.x + outDir.x * 0.02,
-        surfVec.y + outDir.y * 0.02,
-        surfVec.z + outDir.z * 0.02,
-      ],
+      position: [worldBase.x, worldBase.y, worldBase.z],
       rotation: [euler.x, euler.y, euler.z],
       scale: scl,
     });
@@ -749,178 +849,7 @@ function generateSubBudFeatures(
   return { mergedPistilGeometry, conePistilFallback, trichomeStalks, trichomeHeads, leaves };
 }
 
-function buildSubBudCluster(pheno: Phenotype): SubBudData[] {
-  const subBuds: SubBudData[] = [];
-  const totalSubBuds = pheno.subBudCount + 1;
-
-  for (let i = 0; i < totalSubBuds; i++) {
-    const isMain = i === 0;
-    const s = pheno.seed + i * 31.7;
-    const localSeed = pheno.seed + i * 100;
-
-    let position: [number, number, number];
-    let scale: [number, number, number];
-    let rotation: [number, number, number];
-
-    if (isMain) {
-      position = [0, 0, 0];
-      scale = [1, 1, 1];
-      rotation = [0, 0, 0];
-    } else {
-      const angleIndex = i - 1;
-      const totalSubs = totalSubBuds - 1;
-      const baseAngle = (angleIndex / totalSubs) * Math.PI * 2;
-      const angle = baseAngle + (pseudoRandom(s) - 0.5) * 1.2;
-      const yBias = pseudoRandom(s + 1);
-      const yPos = -0.3 + yBias * 1.3;
-      const dist = 0.4 + pseudoRandom(s + 2) * 0.25;
-      const subSize = 0.38 + pseudoRandom(s + 3) * 0.22;
-      const subElongation = 0.85 + pseudoRandom(s + 4) * 0.5;
-
-      position = [
-        Math.cos(angle) * dist,
-        yPos * pheno.elongation * 0.65,
-        Math.sin(angle) * dist,
-      ];
-      scale = [subSize, subSize * subElongation, subSize];
-      rotation = [
-        (pseudoRandom(s + 5) - 0.5) * 0.5,
-        pseudoRandom(s + 6) * Math.PI * 2,
-        (pseudoRandom(s + 7) - 0.5) * 0.5,
-      ];
-    }
-
-    const geometry = buildBudGeometry(pheno, localSeed, isMain ? 5 : 4);
-
-    const greenTint = pheno.baseGreen.clone().offsetHSL(
-      (pseudoRandom(localSeed + 50) - 0.5) * 0.04,
-      (pseudoRandom(localSeed + 60) - 0.5) * 0.15,
-      (pseudoRandom(localSeed + 70) - 0.5) * 0.12
-    );
-
-    const featureShare = isMain ? 0.45 : 0.55 / (totalSubBuds - 1);
-    const pistilCount = Math.max(5, Math.floor(pheno.pistilCount * featureShare));
-    const trichomeCount = Math.floor(pheno.trichomeCount * featureShare * 1.6);
-    const leafCount = isMain ? pheno.sugarLeafCount : Math.max(1, Math.floor(pheno.sugarLeafCount * 0.4));
-
-    const features = generateSubBudFeatures(pheno, localSeed, pistilCount, trichomeCount, leafCount);
-
-    subBuds.push({
-      position,
-      scale,
-      rotation,
-      geometry,
-      greenTint,
-      ...features,
-    });
-  }
-
-  return subBuds;
-}
-
 // =================== COMPONENTS ===================
-
-function SubBudGroup({
-  data,
-  pheno,
-  leafShape,
-}: {
-  data: SubBudData;
-  pheno: Phenotype;
-  leafShape: THREE.Shape;
-}) {
-  return (
-    <group position={data.position} scale={data.scale} rotation={data.rotation}>
-      {/* MAIN BUD BODY — physical material with clearcoat (no sheen/transmission) */}
-      <mesh geometry={data.geometry}>
-        <meshPhysicalMaterial
-          vertexColors
-          roughness={0.5}
-          metalness={0.03}
-          clearcoat={0.35}
-          clearcoatRoughness={0.55}
-        />
-      </mesh>
-
-      {/* SUGAR LEAVES — flat on surface, 5-finger cannabis shape */}
-      {data.leaves.map((l, i) => (
-        <mesh
-          key={`leaf-${i}`}
-          position={l.position}
-          rotation={l.rotation}
-          scale={[l.scale, l.scale, l.scale]}
-        >
-          <shapeGeometry args={[leafShape]} />
-          <meshPhysicalMaterial
-            color={data.greenTint.clone().multiplyScalar(1.15)}
-            roughness={0.55}
-            metalness={0.02}
-            clearcoat={0.4}
-            clearcoatRoughness={0.5}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      ))}
-
-      {/* PISTILS — merged TubeGeometry if available, else cone instances fallback */}
-      {data.mergedPistilGeometry ? (
-        <mesh geometry={data.mergedPistilGeometry}>
-          <meshStandardMaterial vertexColors roughness={0.65} metalness={0.0} />
-        </mesh>
-      ) : data.conePistilFallback.length > 0 ? (
-        <Instances limit={Math.max(80, data.conePistilFallback.length)} range={data.conePistilFallback.length}>
-          <coneGeometry args={[1, 1, 6]} />
-          <meshStandardMaterial roughness={0.65} metalness={0.0} />
-          {data.conePistilFallback.map((p, i) => (
-            <Instance
-              key={i}
-              position={p.position}
-              rotation={p.rotation}
-              scale={p.scale}
-              color={p.color}
-            />
-          ))}
-        </Instances>
-      ) : null}
-
-      {/* TRICHOME STALKS — small matte cones */}
-      {data.trichomeStalks.length > 0 && (
-        <Instances limit={Math.max(180, data.trichomeStalks.length)} range={data.trichomeStalks.length}>
-          <coneGeometry args={[1, 1, 5]} />
-          <meshStandardMaterial
-            color="#e8e0c0"
-            roughness={0.4}
-            metalness={0.15}
-            emissive="#fff4c0"
-            emissiveIntensity={0.2}
-          />
-          {data.trichomeStalks.map((t, i) => (
-            <Instance key={i} position={t.position} rotation={t.rotation} scale={t.scale} />
-          ))}
-        </Instances>
-      )}
-
-      {/* TRICHOME HEADS — capsules with polished-resin look (no transmission for stability) */}
-      {data.trichomeHeads.length > 0 && (
-        <Instances limit={Math.max(180, data.trichomeHeads.length)} range={data.trichomeHeads.length}>
-          <capsuleGeometry args={[1, 1.0, 3, 5]} />
-          <meshPhysicalMaterial
-            color="#fff8e0"
-            roughness={0.04}
-            metalness={0.85}
-            clearcoat={1.0}
-            clearcoatRoughness={0.08}
-            emissive="#fff8c0"
-            emissiveIntensity={pheno.trichomeGlow * 0.6}
-          />
-          {data.trichomeHeads.map((t, i) => (
-            <Instance key={i} position={t.position} rotation={t.rotation} scale={t.scale} />
-          ))}
-        </Instances>
-      )}
-    </group>
-  );
-}
 
 function Bud({ strain }: { strain: Strain }) {
   const groupRef = useRef<THREE.Group>(null);
@@ -928,11 +857,13 @@ function Bud({ strain }: { strain: Strain }) {
   const built = useMemo(() => {
     try {
       const ph = getPhenotype(strain);
-      const sb = buildSubBudCluster(ph);
-      return { pheno: ph, subBuds: sb, ok: true as const };
+      const core = buildInnerBudCore(ph);
+      const calyces = buildCalyxCluster(ph);
+      const features = generateBudFeatures(ph, calyces);
+      return { pheno: ph, core, calyces, features, ok: true as const };
     } catch (e) {
       console.error("[Bud] Build failed:", e);
-      return { pheno: null, subBuds: [], ok: false as const };
+      return { pheno: null, core: null, calyces: [], features: null, ok: false as const };
     }
   }, [strain]);
 
@@ -944,8 +875,7 @@ function Bud({ strain }: { strain: Strain }) {
     }
   });
 
-  if (!built.ok || !built.pheno) {
-    // Fallback to simple sphere if main build crashed
+  if (!built.ok || !built.pheno || !built.core || !built.features) {
     return (
       <group ref={groupRef}>
         <mesh>
@@ -956,22 +886,120 @@ function Bud({ strain }: { strain: Strain }) {
     );
   }
 
+  const { pheno, core, calyces, features } = built;
+
   return (
-    <group ref={groupRef} position={[0, 0.1, 0]}>
-      {/* STEM */}
-      <mesh position={[0, -built.pheno.elongation - 0.28, 0]}>
+    <group ref={groupRef} position={[0, 0.1, 0]} scale={0.78}>
+      {/* === STEM === */}
+      <mesh position={[0, -pheno.elongation - 0.35, 0]}>
         <cylinderGeometry args={[0.05, 0.065, 0.5, 12]} />
         <meshStandardMaterial color="#5a4225" roughness={0.88} metalness={0.05} />
       </mesh>
-      <mesh position={[0, -built.pheno.elongation, 0]}>
-        <sphereGeometry args={[0.08, 14, 10]} />
+      <mesh position={[0, -pheno.elongation - 0.05, 0]}>
+        <sphereGeometry args={[0.1, 14, 10]} />
         <meshStandardMaterial color="#7b5e35" roughness={0.8} />
       </mesh>
 
-      {/* SUB-BUD CLUSTER */}
-      {built.subBuds.map((sb, i) => (
-        <SubBudGroup key={i} data={sb} pheno={built.pheno!} leafShape={leafShape} />
+      {/* === INNER BUD CORE (hides gaps, shadow layer) === */}
+      <mesh geometry={core}>
+        <meshStandardMaterial vertexColors roughness={0.7} metalness={0.02} />
+      </mesh>
+
+      {/* === CALYX CLUSTER (the actual visible "popcorn" structure) === */}
+      {calyces.map((c, i) => (
+        <mesh
+          key={`calyx-${i}`}
+          geometry={c.geometry}
+          position={c.position}
+          rotation={c.rotation}
+          scale={c.scale}
+        >
+          <meshPhysicalMaterial
+            vertexColors
+            roughness={0.45}
+            metalness={0.04}
+            clearcoat={0.4}
+            clearcoatRoughness={0.5}
+          />
+        </mesh>
       ))}
+
+      {/* === SUGAR LEAVES === */}
+      {features.leaves.map((l, i) => (
+        <mesh
+          key={`leaf-${i}`}
+          position={l.position}
+          rotation={l.rotation}
+          scale={[l.scale, l.scale, l.scale]}
+        >
+          <shapeGeometry args={[leafShape]} />
+          <meshPhysicalMaterial
+            color={pheno.baseGreen.clone().multiplyScalar(1.2)}
+            roughness={0.55}
+            metalness={0.03}
+            clearcoat={0.4}
+            clearcoatRoughness={0.5}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      ))}
+
+      {/* === CURVED PISTILS (merged TubeGeometry or cone fallback) === */}
+      {features.mergedPistilGeometry ? (
+        <mesh geometry={features.mergedPistilGeometry}>
+          <meshStandardMaterial vertexColors roughness={0.65} metalness={0.0} />
+        </mesh>
+      ) : features.conePistilFallback.length > 0 ? (
+        <Instances limit={Math.max(80, features.conePistilFallback.length)} range={features.conePistilFallback.length}>
+          <coneGeometry args={[1, 1, 6]} />
+          <meshStandardMaterial roughness={0.65} metalness={0.0} />
+          {features.conePistilFallback.map((p, i) => (
+            <Instance
+              key={i}
+              position={p.position}
+              rotation={p.rotation}
+              scale={p.scale}
+              color={p.color}
+            />
+          ))}
+        </Instances>
+      ) : null}
+
+      {/* === TRICHOME STALKS === */}
+      {features.trichomeStalks.length > 0 && (
+        <Instances limit={Math.max(400, features.trichomeStalks.length)} range={features.trichomeStalks.length}>
+          <coneGeometry args={[1, 1, 5]} />
+          <meshStandardMaterial
+            color="#e8e0c0"
+            roughness={0.4}
+            metalness={0.15}
+            emissive="#fff4c0"
+            emissiveIntensity={0.2}
+          />
+          {features.trichomeStalks.map((t, i) => (
+            <Instance key={i} position={t.position} rotation={t.rotation} scale={t.scale} />
+          ))}
+        </Instances>
+      )}
+
+      {/* === TRICHOME HEADS — polished resin look (no transmission) === */}
+      {features.trichomeHeads.length > 0 && (
+        <Instances limit={Math.max(400, features.trichomeHeads.length)} range={features.trichomeHeads.length}>
+          <capsuleGeometry args={[1, 1.0, 3, 5]} />
+          <meshPhysicalMaterial
+            color="#fff8e0"
+            roughness={0.04}
+            metalness={0.85}
+            clearcoat={1.0}
+            clearcoatRoughness={0.08}
+            emissive="#fff8c0"
+            emissiveIntensity={pheno.trichomeGlow * 0.65}
+          />
+          {features.trichomeHeads.map((t, i) => (
+            <Instance key={i} position={t.position} rotation={t.rotation} scale={t.scale} />
+          ))}
+        </Instances>
+      )}
     </group>
   );
 }
@@ -979,7 +1007,7 @@ function Bud({ strain }: { strain: Strain }) {
 function BudViewer({ strain }: { strain: Strain }) {
   return (
     <Canvas
-      camera={{ position: [0, 0.3, 4.3], fov: 38 }}
+      camera={{ position: [0, 0.3, 5.8], fov: 38 }}
       dpr={[1, 2]}
       gl={{
         antialias: true,
@@ -988,7 +1016,6 @@ function BudViewer({ strain }: { strain: Strain }) {
         failIfMajorPerformanceCaveat: false,
       }}
       onCreated={({ gl }) => {
-        // WebGL context loss recovery
         const canvas = gl.domElement;
         const handleLost = (e: Event) => {
           e.preventDefault();
@@ -1012,7 +1039,7 @@ function BudViewer({ strain }: { strain: Strain }) {
         <Float speed={1.2} rotationIntensity={0.25} floatIntensity={0.2}>
           <Bud strain={strain} />
         </Float>
-        <ContactShadows position={[0, -2.0, 0]} opacity={0.55} blur={2.8} far={3} scale={5} color="#000000" />
+        <ContactShadows position={[0, -1.8, 0]} opacity={0.55} blur={2.8} far={3} scale={4} color="#000000" />
         <OrbitControls
           enableZoom={false}
           enablePan={false}
@@ -1025,7 +1052,6 @@ function BudViewer({ strain }: { strain: Strain }) {
   );
 }
 
-// Static fallback shown if 3D crashes
 function StaticBudFallback({ strain }: { strain: Strain }) {
   return (
     <div
@@ -1372,7 +1398,6 @@ export default function Home() {
           <div className="modal">
             <button className="modal-close" onClick={() => setSelected(null)}>×</button>
             <div className="modal-hero" style={{ background: `linear-gradient(180deg, ${selected.color}dd 0%, ${selected.color} 50%, ${selected.color}cc 100%)` }}>
-              {/* ClientOnly prevents SSR of three.js. ErrorBoundary catches any render crash so the page stays usable. */}
               <Bud3DErrorBoundary fallback={<StaticBudFallback strain={selected} />}>
                 <ClientOnly fallback={<StaticBudFallback strain={selected} />}>
                   <BudViewer strain={selected} />
