@@ -369,7 +369,7 @@ function getPhenotype(strain: Strain): Phenotype {
   const isSativa = t === "sativa";
   const isCBD = t === "cbd";
   const nameKey = (strain.name + " " + strain.genetics).toLowerCase();
-  const isPurple = /(purple|granddaddy|blueberry|zkittlez|grape|gelato)/.test(nameKey);
+  const isPurple = /(purple|granddaddy|blueberry|zkittlez|grape|gelato|northern|bubba|master)/.test(nameKey);
   const isLemon = /(lemon|haze)/.test(nameKey);
   const isWhite = /(white|silver|frost|wedding|gorilla|glue)/.test(nameKey);
   const isOrange = /(diesel|sour|tangie|orange)/.test(nameKey);
@@ -382,12 +382,12 @@ function getPhenotype(strain: Strain): Phenotype {
   const bumpHighlight = new THREE.Color().setHSL(greenH, greenS * 0.65, Math.min(0.62, greenL + 0.27));
   const darkCrevice = new THREE.Color().setHSL(greenH, greenS * 0.9, Math.max(0.05, greenL - 0.16));
 
-  // Calyx count: indica = dense (more calyces), sativa = looser (fewer)
+  // Calyx count: indica = dense (more calyces), sativa = looser (fewer) — boosted
   const calyxCount = isIndica
-    ? 30 + Math.floor(r(30) * 6)  // 30-36
+    ? 38 + Math.floor(r(30) * 8)  // 38-46
     : isSativa
-    ? 24 + Math.floor(r(30) * 4)  // 24-28
-    : 26 + Math.floor(r(30) * 6); // 26-32
+    ? 30 + Math.floor(r(30) * 6)  // 30-36
+    : 32 + Math.floor(r(30) * 8); // 32-40
 
   return {
     type: t,
@@ -395,20 +395,20 @@ function getPhenotype(strain: Strain): Phenotype {
     taper: isSativa ? 0.28 + r(2) * 0.08 : 0.16 + r(2) * 0.08,
     bumpStrength: 1.1 + r(4) * 0.4,
     asymmetry: 0.08 + r(5) * 0.1,
-    pistilCount: Math.floor(35 + r(6) * 25),
-    pistilLength: 0.18 + r(7) * 0.15,
+    pistilCount: Math.floor(55 + r(6) * 30),  // boosted: 55-85
+    pistilLength: 0.22 + r(7) * 0.18,           // longer
     pistilThickness: 0.005 + r(8) * 0.003,
     pistilWhiteRatio: isOrange ? 0.05 + r(9) * 0.1 : 0.15 + r(9) * 0.2,
     pistilHue: 0.045 + r(10) * 0.05,
     pistilCurve: 0.55 + r(11) * 0.45,
-    trichomeCount: isWhite ? Math.floor(220 + r(12) * 100) : Math.floor(140 + r(12) * 80),
-    trichomeSize: 0.011 + r(13) * 0.005,
+    trichomeCount: isWhite ? Math.floor(320 + r(12) * 120) : Math.floor(220 + r(12) * 100),  // boosted
+    trichomeSize: 0.014 + r(13) * 0.006,  // bigger
     trichomeGlow: isWhite ? 0.85 + r(14) * 0.3 : 0.6 + r(14) * 0.3,
     baseGreen,
     darkGreen,
     bumpHighlight,
     darkCrevice,
-    purpleHint: isPurple ? 0.6 + r(15) * 0.25 : isIndica ? 0.08 + r(15) * 0.12 : 0,
+    purpleHint: isPurple ? 0.6 + r(15) * 0.25 : isIndica ? 0.18 + r(15) * 0.18 : 0,  // indica base boosted
     yellowHint: isLemon ? 0.18 + r(16) * 0.1 : 0.04 + r(16) * 0.04,
     whiteHint: isWhite ? 0.22 + r(17) * 0.1 : 0,
     calyxCount,
@@ -437,7 +437,7 @@ function buildInnerBudCore(pheno: Phenotype): THREE.BufferGeometry {
     x += lean * Math.cos(pheno.seed);
     z += lean * Math.sin(pheno.seed);
 
-    // Mild FBM displacement (less than calyces — this is the BACKGROUND layer)
+    // Mild FBM displacement
     const noise = fbm(x * 1.5, y * 1.1, z * 1.5, pheno.seed, 3) * 0.06;
     const dist = Math.max(0.0001, Math.sqrt(x * x + y * y + z * z));
     const scale = (dist + noise) / dist;
@@ -445,10 +445,10 @@ function buildInnerBudCore(pheno: Phenotype): THREE.BufferGeometry {
     positions.setY(i, y * scale);
     positions.setZ(i, z * scale);
 
-    // Color: dark green (this is the SHADOW/BACKGROUND under calyces)
+    // VERY dark color — this is the shadow that shows between calyces
     const c = pheno.darkGreen.clone();
     const variation = pseudoRandom(i * 3.456 + pheno.seed);
-    c.multiplyScalar(0.65 + variation * 0.35);
+    c.multiplyScalar(0.35 + variation * 0.2); // 0.35-0.55 multiplier = much darker
     colors.push(c.r, c.g, c.b);
   }
 
@@ -472,7 +472,8 @@ type CalyxData = {
 };
 
 function buildCalyxGeometry(seed: number, tintColor: THREE.Color): THREE.BufferGeometry {
-  const geo = new THREE.IcosahedronGeometry(1, 2); // 162 verts — lightweight
+  // detail 3 = ~642 verts — much smoother than detail 2 (~162)
+  const geo = new THREE.IcosahedronGeometry(1, 3);
   const positions = geo.attributes.position;
   const colors: number[] = [];
 
@@ -481,25 +482,26 @@ function buildCalyxGeometry(seed: number, tintColor: THREE.Color): THREE.BufferG
     let y = positions.getY(i);
     let z = positions.getZ(i);
 
-    // Egg-shape: elongate towards +Y (the outward-facing tip), narrower at tip
-    y *= 1.3;
-    const yNorm = y / 1.3;
-    if (yNorm > 0.2) {
-      const taper = 1 - (yNorm - 0.2) * 0.45;
+    // Egg-shape: gentle elongation, mostly rounded (no longer "tear-drop" shape)
+    y *= 1.15;
+    const yNorm = y / 1.15;
+    // Mild taper only at very top half
+    if (yNorm > 0.5) {
+      const taper = 1 - (yNorm - 0.5) * 0.35;
       x *= taper;
       z *= taper;
     } else if (yNorm < -0.3) {
-      // Slightly wider at base
-      const widen = 1 + (yNorm + 0.3) * (yNorm + 0.3) * 0.15;
+      // Slight base rounding
+      const widen = 1 + (yNorm + 0.3) * (yNorm + 0.3) * 0.1;
       x *= widen;
       z *= widen;
     }
 
-    // Surface noise — subtle, gives each calyx individual character
+    // Surface noise — slightly stronger for organic, pebble-like look
     const angle = Math.atan2(z, x);
-    const noise = Math.sin(angle * 5 + y * 3 + seed) * 0.04
-                + Math.cos(angle * 7 - y * 5 + seed * 2) * 0.025
-                + (pseudoRandom(seed + i * 7.3) - 0.5) * 0.025;
+    const noise = Math.sin(angle * 5 + y * 3 + seed) * 0.045
+                + Math.cos(angle * 7 - y * 5 + seed * 2) * 0.028
+                + (pseudoRandom(seed + i * 7.3) - 0.5) * 0.035;
 
     const dist = Math.max(0.0001, Math.sqrt(x * x + y * y + z * z));
     const scale = (dist + noise) / dist;
@@ -507,9 +509,9 @@ function buildCalyxGeometry(seed: number, tintColor: THREE.Color): THREE.BufferG
     positions.setY(i, y * scale);
     positions.setZ(i, z * scale);
 
-    // Vertex color: darker at base (towards bud center), lighter at tip
+    // Vertex color: more dramatic gradient (darker base for shadow, lighter tip for highlight)
     const yPos = positions.getY(i);
-    const shadeFactor = 0.72 + ((yPos + 1.3) / 2.6) * 0.55;
+    const shadeFactor = 0.55 + ((yPos + 1.15) / 2.3) * 0.75; // 0.55 at base → 1.3 at tip
     colors.push(tintColor.r * shadeFactor, tintColor.g * shadeFactor, tintColor.b * shadeFactor);
   }
 
@@ -529,8 +531,8 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
     const s = pheno.seed + i * 31.7;
     const t = i / Math.max(1, pheno.calyxCount - 1);
 
-    // Y in [-1, 1] (top to bottom of cluster)
-    let y = 1 - 2 * t + (pseudoRandom(s) - 0.5) * 0.1;
+    // Y in [-1, 1] (top to bottom of cluster) — slight top bias
+    let y = 1 - 2 * Math.pow(t, 1.15) + (pseudoRandom(s) - 0.5) * 0.1;
     y = Math.max(-1, Math.min(1, y));
 
     const baseR = Math.sqrt(Math.max(0, 1 - y * y));
@@ -545,14 +547,25 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
     const z = Math.sin(angle) * rTapered * radiusVariation;
     const yPos = y * pheno.elongation;
 
-    // Outward direction (Y of calyx points away from bud center, biased upward)
-    const outDir = new THREE.Vector3(x, yPos * 0.45 + 0.08, z).normalize();
+    // Outward direction (radial, slightly upward biased)
+    const outDir = new THREE.Vector3(x, yPos * 0.4 + 0.08, z).normalize();
 
-    // Calyx size — larger at top (real cola tip has bigger calyces)
-    const topBoost = y > 0 ? 1 + y * 0.22 : 1 - Math.abs(y) * 0.12;
-    const baseScale = (0.24 + pseudoRandom(s + 3) * 0.08) * topBoost;
+    // RANDOM TILT — organic chaos (real buds aren't geometrically perfect)
+    const tempPerp = new THREE.Vector3(
+      pseudoRandom(s + 20) - 0.5,
+      pseudoRandom(s + 21) - 0.5,
+      pseudoRandom(s + 22) - 0.5
+    );
+    const tiltAxis = new THREE.Vector3().crossVectors(outDir, tempPerp).normalize();
+    const tiltAngle = pseudoRandom(s + 23) * 0.45; // up to ~26°
+    const tiltQ = new THREE.Quaternion().setFromAxisAngle(tiltAxis, tiltAngle);
+    const tiltedDir = outDir.clone().applyQuaternion(tiltQ);
+
+    // EXTREME size variation — top calyces big, bottom calyces small
+    const topBoost = y > 0 ? 1 + y * 0.5 : 1 - Math.abs(y) * 0.3;
+    const baseScale = (0.22 + pseudoRandom(s + 3) * 0.12) * topBoost; // 0.22-0.34 × topBoost
     const scaleVar = pseudoRandom(s + 4);
-    const scaleXZ = baseScale * (0.85 + scaleVar * 0.25);
+    const scaleXZ = baseScale * (0.8 + scaleVar * 0.35);
     const scaleY = baseScale * (1.0 + pseudoRandom(s + 5) * 0.3);
 
     // Color tint per calyx
@@ -564,8 +577,8 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
     );
     if (pheno.purpleHint > 0) {
       const purpleAmt = pheno.purpleHint * (0.3 + pseudoRandom(s + 9) * 0.7);
-      const heightBoost = y > 0.3 ? 1.4 : (y > -0.2 ? 0.8 : 0.4);
-      calyxColor.lerp(purpleColor, purpleAmt * 0.55 * heightBoost);
+      const heightBoost = y > 0.3 ? 1.5 : (y > -0.2 ? 0.9 : 0.4);
+      calyxColor.lerp(purpleColor, purpleAmt * 0.6 * heightBoost);
     }
     if (pheno.yellowHint > 0 && pseudoRandom(s + 10) > 0.55) {
       calyxColor.lerp(yellowGreen, pheno.yellowHint * 0.4);
@@ -580,7 +593,7 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
 
     const position: [number, number, number] = [x, yPos, z];
     const scale: [number, number, number] = [scaleXZ, scaleY, scaleXZ];
-    const rotation = rotationFromDir(outDir);
+    const rotation = rotationFromDir(tiltedDir);
 
     const transformMatrix = new THREE.Matrix4().compose(
       new THREE.Vector3(...position),
@@ -594,7 +607,7 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
       rotation,
       geometry,
       worldCenter: new THREE.Vector3(...position),
-      worldOutDir: outDir,
+      worldOutDir: tiltedDir,
       transformMatrix,
       clusterY: y,
     });
@@ -664,10 +677,10 @@ function generateBudFeatures(pheno: Phenotype, calyces: CalyxData[]): BudFeature
   const trichomeHeads: InstanceData[] = [];
   const leaves: LeafData[] = [];
 
-  // === PISTILS: only from top quarter of cluster, emerging between calyces ===
-  // Filter to upper calyces only (clusterY > 0.2)
-  const upperCalyces = calyces.filter((c) => c.clusterY > 0.2);
-  const pistilSampleCount = Math.min(pheno.pistilCount, upperCalyces.length * 3);
+  // === PISTILS: emerging from top half of cluster ===
+  // Allow calyces from clusterY > 0.1 (top half) to spawn pistils
+  const upperCalyces = calyces.filter((c) => c.clusterY > 0.1);
+  const pistilSampleCount = Math.min(pheno.pistilCount, upperCalyces.length * 5);
 
   for (let i = 0; i < pistilSampleCount; i++) {
     const s = pheno.seed + i * 7.89 + 5000;
@@ -916,10 +929,10 @@ function Bud({ strain }: { strain: Strain }) {
         >
           <meshPhysicalMaterial
             vertexColors
-            roughness={0.45}
-            metalness={0.04}
-            clearcoat={0.4}
-            clearcoatRoughness={0.5}
+            roughness={0.38}
+            metalness={0.05}
+            clearcoat={0.55}
+            clearcoatRoughness={0.4}
           />
         </mesh>
       ))}
@@ -967,14 +980,14 @@ function Bud({ strain }: { strain: Strain }) {
 
       {/* === TRICHOME STALKS === */}
       {features.trichomeStalks.length > 0 && (
-        <Instances limit={Math.max(400, features.trichomeStalks.length)} range={features.trichomeStalks.length}>
+        <Instances limit={Math.max(500, features.trichomeStalks.length)} range={features.trichomeStalks.length}>
           <coneGeometry args={[1, 1, 5]} />
           <meshStandardMaterial
-            color="#e8e0c0"
-            roughness={0.4}
-            metalness={0.15}
-            emissive="#fff4c0"
-            emissiveIntensity={0.2}
+            color="#f4ecc8"
+            roughness={0.35}
+            metalness={0.2}
+            emissive="#fff8c8"
+            emissiveIntensity={0.3}
           />
           {features.trichomeStalks.map((t, i) => (
             <Instance key={i} position={t.position} rotation={t.rotation} scale={t.scale} />
@@ -982,18 +995,18 @@ function Bud({ strain }: { strain: Strain }) {
         </Instances>
       )}
 
-      {/* === TRICHOME HEADS — polished resin look (no transmission) === */}
+      {/* === TRICHOME HEADS — bright polished resin look === */}
       {features.trichomeHeads.length > 0 && (
-        <Instances limit={Math.max(400, features.trichomeHeads.length)} range={features.trichomeHeads.length}>
+        <Instances limit={Math.max(500, features.trichomeHeads.length)} range={features.trichomeHeads.length}>
           <capsuleGeometry args={[1, 1.0, 3, 5]} />
           <meshPhysicalMaterial
-            color="#fff8e0"
-            roughness={0.04}
-            metalness={0.85}
+            color="#fffaea"
+            roughness={0.03}
+            metalness={0.9}
             clearcoat={1.0}
-            clearcoatRoughness={0.08}
-            emissive="#fff8c0"
-            emissiveIntensity={pheno.trichomeGlow * 0.65}
+            clearcoatRoughness={0.05}
+            emissive="#fff8d0"
+            emissiveIntensity={pheno.trichomeGlow * 0.9}
           />
           {features.trichomeHeads.map((t, i) => (
             <Instance key={i} position={t.position} rotation={t.rotation} scale={t.scale} />
@@ -1030,16 +1043,19 @@ function BudViewer({ strain }: { strain: Strain }) {
     >
       <Suspense fallback={null}>
         <Environment preset="forest" background={false} />
-        <directionalLight position={[5, 8, 5]} intensity={1.6} color="#fff6e3" />
-        <directionalLight position={[-5, 4, -3]} intensity={0.8} color="#a8c4ff" />
-        <directionalLight position={[0, -2, 4]} intensity={0.5} color="#ffd9a8" />
-        <pointLight position={[3, 4, 2]} intensity={0.55} color="#ffffff" distance={12} />
-        <pointLight position={[-2, 2, 3]} intensity={0.35} color="#e8f0ff" distance={10} />
-        <ambientLight intensity={0.3} />
+        {/* Strong key light from upper right — main sunlight */}
+        <directionalLight position={[5, 8, 5]} intensity={2.1} color="#fff6e3" castShadow />
+        {/* Reduced fill from cool sky direction — preserves shadow depth */}
+        <directionalLight position={[-5, 4, -3]} intensity={0.55} color="#a8c4ff" />
+        {/* Rim light from below — makes trichomes glow */}
+        <directionalLight position={[0, -2, 4]} intensity={0.65} color="#ffd9a8" />
+        <pointLight position={[3, 4, 2]} intensity={0.5} color="#ffffff" distance={12} />
+        <pointLight position={[-2, 2, 3]} intensity={0.25} color="#e8f0ff" distance={10} />
+        <ambientLight intensity={0.22} />
         <Float speed={1.2} rotationIntensity={0.25} floatIntensity={0.2}>
           <Bud strain={strain} />
         </Float>
-        <ContactShadows position={[0, -1.8, 0]} opacity={0.55} blur={2.8} far={3} scale={4} color="#000000" />
+        <ContactShadows position={[0, -1.8, 0]} opacity={0.6} blur={2.8} far={3} scale={4} color="#000000" />
         <OrbitControls
           enableZoom={false}
           enablePan={false}
