@@ -444,11 +444,11 @@ function getPhenotype(strain: Strain): Phenotype {
     bumpStrength: 1.1 + r(4) * 0.4,
     asymmetry: 0.08 + r(5) * 0.1,
     pistilCount: Math.floor(80 + r(6) * 40),
-    pistilLength: 0.28 + r(7) * 0.2,
-    pistilThickness: 0.005 + r(8) * 0.003,
+    pistilLength: 0.22 + r(7) * 0.18,           // kürzer für proportional besseres Aussehen
+    pistilThickness: 0.0065 + r(8) * 0.0035,    // dicker — sichtbarer
     pistilWhiteRatio: isOrange ? 0.05 + r(9) * 0.1 : 0.15 + r(9) * 0.2,
     pistilHue: 0.045 + r(10) * 0.05,
-    pistilCurve: 0.55 + r(11) * 0.45,
+    pistilCurve: 0.85 + r(11) * 0.5,            // VIEL mehr curl (war 0.55-1.0)
     trichomeCount: isWhite ? Math.floor(680 + r(12) * 180) : Math.floor(480 + r(12) * 180),
     trichomeSize: 0.017 + r(13) * 0.007,
     trichomeGlow: isWhite ? 0.9 + r(14) * 0.3 : 0.7 + r(14) * 0.3,
@@ -856,15 +856,16 @@ function buildCurvedPistilGeometry(
   );
   const side = new THREE.Vector3().crossVectors(outDirection, tempSide).normalize();
 
+  // Pistil curve — natural "shaggy" curl with strong side bend (real pistils don't grow straight)
   const p0 = surfacePos.clone();
-  const p1 = surfacePos.clone().add(outDirection.clone().multiplyScalar(length * 0.3));
+  const p1 = surfacePos.clone().add(outDirection.clone().multiplyScalar(length * 0.28));
   const p2 = surfacePos.clone()
-    .add(outDirection.clone().multiplyScalar(length * 0.6))
-    .add(side.clone().multiplyScalar(curveAmount * length * 0.3))
-    .add(new THREE.Vector3(0, length * 0.12, 0));
-  const p3 = surfacePos.clone()
-    .add(outDirection.clone().multiplyScalar(length * 0.9))
+    .add(outDirection.clone().multiplyScalar(length * 0.55))
     .add(side.clone().multiplyScalar(curveAmount * length * 0.5))
+    .add(new THREE.Vector3(0, length * 0.08, 0));
+  const p3 = surfacePos.clone()
+    .add(outDirection.clone().multiplyScalar(length * 0.82))
+    .add(side.clone().multiplyScalar(curveAmount * length * 0.92))
     .add(new THREE.Vector3(0, length * upBias, 0));
 
   const curve = new THREE.CatmullRomCurve3([p0, p1, p2, p3]);
@@ -918,17 +919,17 @@ function generateBudFeatures(pheno: Phenotype, calyces: CalyxData[]): BudFeature
     const localTip = new THREE.Vector3(tipLocalX, tipLocalY, tipLocalZ);
     const worldTip = localTip.clone().applyMatrix4(calyx.transformMatrix);
 
-    // Outward direction: calyx's outward direction + upward bias
+    // Outward direction: more lateral, less upward — gives natural curl instead of straight antennas
     const outDir = new THREE.Vector3(
-      calyx.worldOutDir.x * 0.6,
-      calyx.worldOutDir.y * 0.5 + 0.7, // strong upward bias
-      calyx.worldOutDir.z * 0.6
+      calyx.worldOutDir.x * 0.78,
+      calyx.worldOutDir.y * 0.35 + 0.4,  // less upward bias
+      calyx.worldOutDir.z * 0.78
     ).normalize();
 
     const length = pheno.pistilLength * (0.55 + pseudoRandom(s + 4) * 0.7);
     const thickness = pheno.pistilThickness * (0.7 + pseudoRandom(s + 5) * 0.6);
-    const curve = pheno.pistilCurve * (0.4 + pseudoRandom(s + 6) * 1.0);
-    const upBias = 0.3 + pseudoRandom(s + 7) * 0.3;
+    const curve = pheno.pistilCurve * (0.5 + pseudoRandom(s + 6) * 1.0);
+    const upBias = 0.12 + pseudoRandom(s + 7) * 0.22; // 0.12-0.34 — viel weniger straight-up
 
     // Color bucket (pistil color variation)
     const t = pseudoRandom(s + 8);
@@ -1053,12 +1054,12 @@ function generateBudFeatures(pheno: Phenotype, calyces: CalyxData[]): BudFeature
       const worldNormal = localSurface.clone().normalize()
         .applyMatrix3(new THREE.Matrix3().setFromMatrix4(calyx.transformMatrix))
         .normalize();
-      const microSize = pheno.trichomeSize * (0.35 + pseudoRandom(s + 2) * 0.3);
+      const microSize = pheno.trichomeSize * (0.55 + pseudoRandom(s + 2) * 0.35); // bigger micros
       trichomeHeads.push({
         position: [
-          worldSurface.x + worldNormal.x * microSize * 0.4,
-          worldSurface.y + worldNormal.y * microSize * 0.4,
-          worldSurface.z + worldNormal.z * microSize * 0.4,
+          worldSurface.x + worldNormal.x * microSize * 0.55,
+          worldSurface.y + worldNormal.y * microSize * 0.55,
+          worldSurface.z + worldNormal.z * microSize * 0.55,
         ],
         rotation: rotationFromDir(worldNormal),
         scale: [microSize, microSize * 0.9, microSize],
