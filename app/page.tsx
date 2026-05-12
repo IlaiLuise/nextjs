@@ -332,6 +332,51 @@ function makeCannabisLeafShape(): THREE.Shape {
   return shape;
 }
 
+// Narrower lanceolate trim leaf (sugar leaf, 3-finger) — for longer leaves between calyces
+function makeTrimLeafShape(): THREE.Shape {
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  // Right side - one mid-finger then to tip
+  shape.bezierCurveTo(0.04, 0.06, 0.11, 0.16, 0.13, 0.3);
+  shape.quadraticCurveTo(0.09, 0.33, 0.06, 0.32);
+  shape.bezierCurveTo(0.08, 0.48, 0.07, 0.7, 0.04, 0.9);
+  shape.bezierCurveTo(0.025, 0.96, 0.012, 0.99, 0, 1.0);
+  // Left side mirror
+  shape.bezierCurveTo(-0.012, 0.99, -0.025, 0.96, -0.04, 0.9);
+  shape.bezierCurveTo(-0.07, 0.7, -0.08, 0.48, -0.06, 0.32);
+  shape.quadraticCurveTo(-0.09, 0.33, -0.13, 0.3);
+  shape.bezierCurveTo(-0.11, 0.16, -0.04, 0.06, 0, 0);
+  return shape;
+}
+
+// Shared calyx color computation — used by main cluster, tip, and side branches
+function getCalyxColor(pheno: Phenotype, s: number, layerT: number): THREE.Color {
+  const purpleColor = new THREE.Color("#3a1f48");
+  const yellowGreen = new THREE.Color("#9aa648");
+  const whiteish = new THREE.Color("#c8d4b8");
+
+  const c = pheno.baseGreen.clone();
+  c.offsetHSL(
+    (pseudoRandom(s + 6) - 0.5) * 0.04,
+    (pseudoRandom(s + 7) - 0.5) * 0.15,
+    (pseudoRandom(s + 8) - 0.5) * 0.12
+  );
+  if (pheno.purpleHint > 0) {
+    const purpleAmt = pheno.purpleHint * (0.3 + pseudoRandom(s + 9) * 0.7);
+    const heightBoost = layerT > 0.65 ? 1.5 : (layerT > 0.4 ? 0.9 : 0.4);
+    c.lerp(purpleColor, purpleAmt * 0.6 * heightBoost);
+  }
+  if (pheno.yellowHint > 0 && pseudoRandom(s + 10) > 0.55) {
+    c.lerp(yellowGreen, pheno.yellowHint * 0.4);
+  }
+  if (pheno.whiteHint > 0 && pseudoRandom(s + 11) > 0.7) {
+    c.lerp(whiteish, pheno.whiteHint * 0.25);
+  }
+  const lightness = 0.85 + pseudoRandom(s + 12) * 0.3;
+  c.multiplyScalar(lightness);
+  return c;
+}
+
 // =================== PHENOTYPE ===================
 
 type Phenotype = {
@@ -358,6 +403,9 @@ type Phenotype = {
   whiteHint: number;
   calyxCount: number;
   sugarLeafCount: number;
+  trimLeafCount: number;
+  hasSideBranches: boolean;
+  sideBranchCount: number;
   seed: number;
 };
 
@@ -395,24 +443,27 @@ function getPhenotype(strain: Strain): Phenotype {
     taper: isSativa ? 0.28 + r(2) * 0.08 : 0.16 + r(2) * 0.08,
     bumpStrength: 1.1 + r(4) * 0.4,
     asymmetry: 0.08 + r(5) * 0.1,
-    pistilCount: Math.floor(55 + r(6) * 30),  // boosted: 55-85
-    pistilLength: 0.22 + r(7) * 0.18,           // longer
+    pistilCount: Math.floor(55 + r(6) * 30),
+    pistilLength: 0.22 + r(7) * 0.18,
     pistilThickness: 0.005 + r(8) * 0.003,
     pistilWhiteRatio: isOrange ? 0.05 + r(9) * 0.1 : 0.15 + r(9) * 0.2,
     pistilHue: 0.045 + r(10) * 0.05,
     pistilCurve: 0.55 + r(11) * 0.45,
-    trichomeCount: isWhite ? Math.floor(420 + r(12) * 150) : Math.floor(300 + r(12) * 120),  // boosted for layered structure
+    trichomeCount: isWhite ? Math.floor(420 + r(12) * 150) : Math.floor(300 + r(12) * 120),
     trichomeSize: 0.014 + r(13) * 0.006,
     trichomeGlow: isWhite ? 0.85 + r(14) * 0.3 : 0.6 + r(14) * 0.3,
     baseGreen,
     darkGreen,
     bumpHighlight,
     darkCrevice,
-    purpleHint: isPurple ? 0.6 + r(15) * 0.25 : isIndica ? 0.18 + r(15) * 0.18 : 0,  // indica base boosted
+    purpleHint: isPurple ? 0.6 + r(15) * 0.25 : isIndica ? 0.18 + r(15) * 0.18 : 0,
     yellowHint: isLemon ? 0.18 + r(16) * 0.1 : 0.04 + r(16) * 0.04,
     whiteHint: isWhite ? 0.22 + r(17) * 0.1 : 0,
     calyxCount,
     sugarLeafCount: Math.floor(4 + r(20) * 4),
+    trimLeafCount: Math.floor(8 + r(40) * 8),  // 8-15 longer untrimmed leaves
+    hasSideBranches: r(50) > 0.4,              // ~60% chance of side branches
+    sideBranchCount: 1 + Math.floor(r(60) * 2), // 1-2 branches if hasSideBranches
     seed,
   };
 }
@@ -545,77 +596,55 @@ function buildCalyxGeometry(seed: number, tintColor: THREE.Color): THREE.BufferG
   return geo;
 }
 
-function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
+type SideBranchData = {
+  startPos: [number, number, number]; // connects to main stem
+  endPos: [number, number, number];   // where the mini-bud is
+  thickness: number;
+};
+
+type CalyxClusterResult = {
+  calyces: CalyxData[];
+  sideBranches: SideBranchData[];
+};
+
+function buildCalyxCluster(pheno: Phenotype): CalyxClusterResult {
   const calyces: CalyxData[] = [];
-  const purpleColor = new THREE.Color("#3a1f48");
-  const yellowGreen = new THREE.Color("#9aa648");
-  const whiteish = new THREE.Color("#c8d4b8");
+  const sideBranches: SideBranchData[] = [];
 
   const isIndica = pheno.type === "indica";
   const isSativa = pheno.type === "sativa";
 
-  // Internode layers along Y axis — real bud structure
+  // Internode layers along Y axis
   const numLayers = isIndica
-    ? 9 + Math.floor(pseudoRandom(pheno.seed + 100) * 3)   // 9-11 layers, dense
+    ? 9 + Math.floor(pseudoRandom(pheno.seed + 100) * 3)
     : isSativa
-    ? 14 + Math.floor(pseudoRandom(pheno.seed + 100) * 4)  // 14-17 layers, elongated
-    : 11 + Math.floor(pseudoRandom(pheno.seed + 100) * 3); // 11-13 layers
+    ? 14 + Math.floor(pseudoRandom(pheno.seed + 100) * 4)
+    : 11 + Math.floor(pseudoRandom(pheno.seed + 100) * 3);
 
   const halfHeight = pheno.elongation;
   const maxRadius = isIndica ? 0.92 : isSativa ? 0.6 : 0.78;
 
-  // Helper for color tinting (used by all calyces)
-  const computeColor = (s: number, layerT: number): THREE.Color => {
-    const c = pheno.baseGreen.clone();
-    c.offsetHSL(
-      (pseudoRandom(s + 6) - 0.5) * 0.04,
-      (pseudoRandom(s + 7) - 0.5) * 0.15,
-      (pseudoRandom(s + 8) - 0.5) * 0.12
-    );
-    if (pheno.purpleHint > 0) {
-      const purpleAmt = pheno.purpleHint * (0.3 + pseudoRandom(s + 9) * 0.7);
-      const heightBoost = layerT > 0.65 ? 1.5 : (layerT > 0.4 ? 0.9 : 0.4);
-      c.lerp(purpleColor, purpleAmt * 0.6 * heightBoost);
-    }
-    if (pheno.yellowHint > 0 && pseudoRandom(s + 10) > 0.55) {
-      c.lerp(yellowGreen, pheno.yellowHint * 0.4);
-    }
-    if (pheno.whiteHint > 0 && pseudoRandom(s + 11) > 0.7) {
-      c.lerp(whiteish, pheno.whiteHint * 0.25);
-    }
-    const lightness = 0.85 + pseudoRandom(s + 12) * 0.3;
-    c.multiplyScalar(lightness);
-    return c;
-  };
-
   // === MAIN LAYERED INTERNODE STRUCTURE ===
   for (let layerIdx = 0; layerIdx < numLayers; layerIdx++) {
-    // layerT from 0.05 (just above bottom) to 0.95 (just below top tip)
     const layerT = 0.05 + (layerIdx / Math.max(1, numLayers - 1)) * 0.88;
 
     const widthFactor = budShapeRadiusAt(layerT, pheno);
     const radiusAtY = widthFactor * maxRadius;
     const yPos = (layerT * 2 - 1) * halfHeight;
 
-    // Calyces per layer: more where bud is wider (middle), fewer at ends
     const layerCalyxCount = Math.max(4, Math.floor(5 + widthFactor * 7));
-
-    // Each layer rotates its spiral slightly for natural look
     const layerRotation = layerIdx * 0.73 + pseudoRandom(pheno.seed + layerIdx) * 0.5;
 
     for (let i = 0; i < layerCalyxCount; i++) {
       const s = pheno.seed + layerIdx * 1000 + i * 7.31;
-
       const baseAngle = (i / layerCalyxCount) * Math.PI * 2 + layerRotation;
       const angle = baseAngle + (pseudoRandom(s) - 0.5) * 0.35;
-
       const radiusVar = 1 + (pseudoRandom(s + 1) - 0.5) * 0.13;
       const x = Math.cos(angle) * radiusAtY * radiusVar;
       const z = Math.sin(angle) * radiusAtY * radiusVar;
       const calyxY = yPos + (pseudoRandom(s + 2) - 0.5) * 0.12;
 
-      // UPWARD-POINTING orientation — top layers more vertical, bottom more outward
-      const upBias = 0.55 + layerT * 0.4; // 0.55 (bottom) → 0.95 (top)
+      const upBias = 0.55 + layerT * 0.4;
       const outBias = 1 - upBias;
       const radialDir = new THREE.Vector3(x, 0, z).normalize();
       const outDir = new THREE.Vector3(
@@ -624,7 +653,6 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
         radialDir.z * outBias
       ).normalize();
 
-      // Random tilt for organic chaos
       const tempPerp = new THREE.Vector3(
         pseudoRandom(s + 20) - 0.5,
         pseudoRandom(s + 21) - 0.5,
@@ -635,20 +663,18 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
       const tiltQ = new THREE.Quaternion().setFromAxisAngle(tiltAxis, tiltAngle);
       const tiltedDir = outDir.clone().applyQuaternion(tiltQ);
 
-      // Size: smaller in general, mild boost at top
       const topBoost = layerT > 0.6 ? 1 + (layerT - 0.6) * 0.7 : 1;
       const baseScale = (0.16 + pseudoRandom(s + 3) * 0.06) * topBoost;
       const scaleVar = pseudoRandom(s + 4);
       const scaleXZ = baseScale * (0.85 + scaleVar * 0.25);
       const scaleY = baseScale * (1.15 + pseudoRandom(s + 5) * 0.35);
 
-      const calyxColor = computeColor(s, layerT);
+      const calyxColor = getCalyxColor(pheno, s, layerT);
       const geometry = buildCalyxGeometry(s + 7000, calyxColor);
 
       const position: [number, number, number] = [x, calyxY, z];
       const scale: [number, number, number] = [scaleXZ, scaleY, scaleXZ];
       const rotation = rotationFromDir(tiltedDir);
-
       const transformMatrix = new THREE.Matrix4().compose(
         new THREE.Vector3(...position),
         new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
@@ -656,10 +682,7 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
       );
 
       calyces.push({
-        position,
-        scale,
-        rotation,
-        geometry,
+        position, scale, rotation, geometry,
         worldCenter: new THREE.Vector3(...position),
         worldOutDir: tiltedDir,
         transformMatrix,
@@ -668,7 +691,7 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
     }
   }
 
-  // === TIP CLUSTER — dense cluster of upward-pointing calyces at the very top ===
+  // === TIP CLUSTER ===
   const tipCount = isSativa ? 4 : 6;
   for (let i = 0; i < tipCount; i++) {
     const s = pheno.seed + i * 13.7 + 99000;
@@ -678,13 +701,7 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
     const z = Math.sin(angle) * r;
     const calyxY = halfHeight * (0.95 + pseudoRandom(s + 1) * 0.05);
 
-    // Almost straight up with tiny outward bias
-    const outDir = new THREE.Vector3(
-      Math.cos(angle) * 0.12,
-      0.99,
-      Math.sin(angle) * 0.12
-    ).normalize();
-
+    const outDir = new THREE.Vector3(Math.cos(angle) * 0.12, 0.99, Math.sin(angle) * 0.12).normalize();
     const tempPerp = new THREE.Vector3(
       pseudoRandom(s + 20) - 0.5,
       pseudoRandom(s + 21) - 0.5,
@@ -695,18 +712,13 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
     const tiltQ = new THREE.Quaternion().setFromAxisAngle(tiltAxis, tiltAngle);
     const tiltedDir = outDir.clone().applyQuaternion(tiltQ);
 
-    // Tip calyces slightly bigger (prominent cola tip)
     const baseScale = 0.19 + pseudoRandom(s + 3) * 0.05;
-    const scaleXZ = baseScale * 0.92;
-    const scaleY = baseScale * 1.3;
-
-    const calyxColor = computeColor(s, 0.95);
+    const calyxColor = getCalyxColor(pheno, s, 0.95);
     const geometry = buildCalyxGeometry(s + 7000, calyxColor);
 
     const position: [number, number, number] = [x, calyxY, z];
-    const scale: [number, number, number] = [scaleXZ, scaleY, scaleXZ];
+    const scale: [number, number, number] = [baseScale * 0.92, baseScale * 1.3, baseScale * 0.92];
     const rotation = rotationFromDir(tiltedDir);
-
     const transformMatrix = new THREE.Matrix4().compose(
       new THREE.Vector3(...position),
       new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
@@ -714,10 +726,7 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
     );
 
     calyces.push({
-      position,
-      scale,
-      rotation,
-      geometry,
+      position, scale, rotation, geometry,
       worldCenter: new THREE.Vector3(...position),
       worldOutDir: tiltedDir,
       transformMatrix,
@@ -725,7 +734,91 @@ function buildCalyxCluster(pheno: Phenotype): CalyxData[] {
     });
   }
 
-  return calyces;
+  // === SIDE BRANCHES (optional, ~60% of strains) ===
+  if (pheno.hasSideBranches) {
+    for (let branchIdx = 0; branchIdx < pheno.sideBranchCount; branchIdx++) {
+      const branchSeed = pheno.seed + branchIdx * 1000 + 80000;
+      const branchAngle = pseudoRandom(branchSeed) * Math.PI * 2;
+      const branchY = -halfHeight * 0.45 + pseudoRandom(branchSeed + 1) * halfHeight * 0.65;
+      const branchOffset = maxRadius * (0.95 + pseudoRandom(branchSeed + 2) * 0.4);
+      const bx = Math.cos(branchAngle) * branchOffset;
+      const bz = Math.sin(branchAngle) * branchOffset;
+
+      // Branch stem data
+      sideBranches.push({
+        startPos: [0, branchY - 0.05, 0],
+        endPos: [bx, branchY, bz],
+        thickness: 0.025 + pseudoRandom(branchSeed + 3) * 0.012,
+      });
+
+      // Mini cluster at branch end
+      const branchCalyxLayers = 3 + Math.floor(pseudoRandom(branchSeed + 4) * 3);
+      const branchClusterHeight = 0.35 + pseudoRandom(branchSeed + 5) * 0.2;
+      const branchClusterRadius = 0.15 + pseudoRandom(branchSeed + 6) * 0.07;
+
+      for (let layer = 0; layer < branchCalyxLayers; layer++) {
+        const layerT = 0.1 + (layer / Math.max(1, branchCalyxLayers - 1)) * 0.85;
+        const branchLayerR = Math.sin(Math.PI * layerT) * branchClusterRadius;
+        const branchLayerY = bz === 0 ? 0 : branchY + (layerT - 0.1) * branchClusterHeight;
+        const layerCount = Math.max(3, Math.floor(3 + branchLayerR / 0.05));
+
+        for (let i = 0; i < layerCount; i++) {
+          const s = branchSeed + layer * 100 + i * 7.31;
+          const localAngle = (i / layerCount) * Math.PI * 2 + layer * 0.6;
+          const localX = Math.cos(localAngle) * branchLayerR;
+          const localZ = Math.sin(localAngle) * branchLayerR;
+          const finalX = bx + localX;
+          const finalY = branchLayerY;
+          const finalZ = bz + localZ;
+
+          const localRadial = new THREE.Vector3(localX, 0, localZ).normalize();
+          const upBias = 0.65 + layerT * 0.3;
+          const outBias = 1 - upBias;
+          const outDir = new THREE.Vector3(
+            localRadial.x * outBias,
+            upBias,
+            localRadial.z * outBias
+          ).normalize();
+
+          const tempPerp = new THREE.Vector3(
+            pseudoRandom(s + 20) - 0.5,
+            pseudoRandom(s + 21) - 0.5,
+            pseudoRandom(s + 22) - 0.5
+          );
+          const tiltAxis = new THREE.Vector3().crossVectors(outDir, tempPerp).normalize();
+          const tiltAngle = pseudoRandom(s + 23) * 0.35;
+          const tiltQ = new THREE.Quaternion().setFromAxisAngle(tiltAxis, tiltAngle);
+          const tiltedDir = outDir.clone().applyQuaternion(tiltQ);
+
+          const baseScale = 0.12 + pseudoRandom(s + 3) * 0.05;
+          const scaleXZ = baseScale * 0.9;
+          const scaleY = baseScale * 1.2;
+
+          const calyxColor = getCalyxColor(pheno, s, layerT);
+          const geometry = buildCalyxGeometry(s + 7000, calyxColor);
+
+          const position: [number, number, number] = [finalX, finalY, finalZ];
+          const scale: [number, number, number] = [scaleXZ, scaleY, scaleXZ];
+          const rotation = rotationFromDir(tiltedDir);
+          const transformMatrix = new THREE.Matrix4().compose(
+            new THREE.Vector3(...position),
+            new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
+            new THREE.Vector3(...scale)
+          );
+
+          calyces.push({
+            position, scale, rotation, geometry,
+            worldCenter: new THREE.Vector3(...position),
+            worldOutDir: tiltedDir,
+            transformMatrix,
+            clusterY: layerT * 2 - 1,
+          });
+        }
+      }
+    }
+  }
+
+  return { calyces, sideBranches };
 }
 
 // =================== WORLD-SPACE FEATURE GENERATORS ===================
@@ -780,6 +873,7 @@ type BudFeatures = {
   trichomeStalks: InstanceData[];
   trichomeHeads: InstanceData[];
   leaves: LeafData[];
+  trimLeaves: LeafData[];
 };
 
 function generateBudFeatures(pheno: Phenotype, calyces: CalyxData[]): BudFeatures {
@@ -971,7 +1065,68 @@ function generateBudFeatures(pheno: Phenotype, calyces: CalyxData[]): BudFeature
     });
   }
 
-  return { mergedPistilGeometry, conePistilFallback, trichomeStalks, trichomeHeads, leaves };
+  return { mergedPistilGeometry, conePistilFallback, trichomeStalks, trichomeHeads, leaves, trimLeaves: generateTrimLeaves(pheno, calyces) };
+}
+
+// === LONG TRIM LEAVES — protruding sugar leaves between calyces (untrimmed look) ===
+function generateTrimLeaves(pheno: Phenotype, calyces: CalyxData[]): LeafData[] {
+  const trimLeaves: LeafData[] = [];
+
+  // Pick from middle-to-upper calyces (where untrimmed leaves typically poke through)
+  const validCalyces = calyces.filter((c) => c.clusterY > -0.5 && c.clusterY < 0.85);
+  if (validCalyces.length === 0) return trimLeaves;
+
+  for (let i = 0; i < pheno.trimLeafCount; i++) {
+    const sl = pheno.seed + i * 23.7 + 50000;
+    const calyx = validCalyces[Math.floor(pseudoRandom(sl) * validCalyces.length)];
+
+    // Position: at calyx base, slightly offset
+    const localBase = new THREE.Vector3(
+      (pseudoRandom(sl + 1) - 0.5) * 0.4,
+      (-0.55 + pseudoRandom(sl + 2) * 0.4) * 1.3,
+      (pseudoRandom(sl + 3) - 0.5) * 0.4
+    );
+    const worldBase = localBase.clone().applyMatrix4(calyx.transformMatrix);
+
+    // Build orientation: tip points UP (parallel to bud Y), surface faces radially outward
+    let worldRadial = new THREE.Vector3(worldBase.x, 0, worldBase.z);
+    if (worldRadial.length() < 0.05) {
+      const ra = pseudoRandom(sl + 4) * Math.PI * 2;
+      worldRadial.set(Math.cos(ra), 0, Math.sin(ra));
+    }
+    worldRadial.normalize();
+
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    let localX = new THREE.Vector3().crossVectors(worldUp, worldRadial);
+    if (localX.length() < 0.01) localX.set(1, 0, 0);
+    localX.normalize();
+
+    // Outward tilt — leaf leans away from bud so it doesn't clip into calyces
+    const outwardTilt = 0.25 + pseudoRandom(sl + 5) * 0.35;
+    const tiltQ = new THREE.Quaternion().setFromAxisAngle(localX, outwardTilt);
+    const tiltedRadial = worldRadial.clone().applyQuaternion(tiltQ);
+    const tiltedY = worldUp.clone().applyQuaternion(tiltQ);
+
+    // Side tilt for variation
+    const sideTilt = (pseudoRandom(sl + 6) - 0.5) * 0.45;
+    const sideTiltQ = new THREE.Quaternion().setFromAxisAngle(tiltedY, sideTilt);
+    const finalRadial = tiltedRadial.clone().applyQuaternion(sideTiltQ);
+    const finalX = localX.clone().applyQuaternion(sideTiltQ);
+    const finalY = tiltedY.clone().applyQuaternion(sideTiltQ);
+
+    const rotMat = new THREE.Matrix4().makeBasis(finalX, finalY, finalRadial);
+    const euler = new THREE.Euler().setFromRotationMatrix(rotMat);
+
+    const scale = 0.3 + pseudoRandom(sl + 7) * 0.28; // 0.3-0.58, larger than sugar leaves
+
+    trimLeaves.push({
+      position: [worldBase.x, worldBase.y, worldBase.z],
+      rotation: [euler.x, euler.y, euler.z],
+      scale,
+    });
+  }
+
+  return trimLeaves;
 }
 
 // =================== COMPONENTS ===================
@@ -983,16 +1138,27 @@ function Bud({ strain }: { strain: Strain }) {
     try {
       const ph = getPhenotype(strain);
       const core = buildInnerBudCore(ph);
-      const calyces = buildCalyxCluster(ph);
-      const features = generateBudFeatures(ph, calyces);
-      return { pheno: ph, core, calyces, features, ok: true as const };
+      const clusterResult = buildCalyxCluster(ph);
+      const features = generateBudFeatures(ph, clusterResult.calyces);
+      return {
+        pheno: ph,
+        core,
+        calyces: clusterResult.calyces,
+        sideBranches: clusterResult.sideBranches,
+        features,
+        ok: true as const,
+      };
     } catch (e) {
       console.error("[Bud] Build failed:", e);
-      return { pheno: null, core: null, calyces: [], features: null, ok: false as const };
+      return {
+        pheno: null, core: null, calyces: [], sideBranches: [], features: null,
+        ok: false as const,
+      };
     }
   }, [strain]);
 
   const leafShape = useMemo(() => makeCannabisLeafShape(), []);
+  const trimLeafShape = useMemo(() => makeTrimLeafShape(), []);
 
   useFrame((_, delta) => {
     if (groupRef.current) {
@@ -1011,26 +1177,49 @@ function Bud({ strain }: { strain: Strain }) {
     );
   }
 
-  const { pheno, core, calyces, features } = built;
+  const { pheno, core, calyces, sideBranches, features } = built;
+
+  // Branch stem positions (compute midpoint and rotation for each)
+  const branchStemMeshes = sideBranches.map((b, i) => {
+    const start = new THREE.Vector3(...b.startPos);
+    const end = new THREE.Vector3(...b.endPos);
+    const mid = start.clone().add(end).multiplyScalar(0.5);
+    const dir = end.clone().sub(start);
+    const length = dir.length();
+    const upVec = new THREE.Vector3(0, 1, 0);
+    const q = new THREE.Quaternion().setFromUnitVectors(upVec, dir.normalize());
+    const e = new THREE.Euler().setFromQuaternion(q);
+    return { key: i, position: [mid.x, mid.y, mid.z] as [number, number, number],
+             rotation: [e.x, e.y, e.z] as [number, number, number],
+             length, thickness: b.thickness };
+  });
 
   return (
     <group ref={groupRef} position={[0, 0.1, 0]} scale={0.78}>
-      {/* === STEM === */}
+      {/* === MAIN STEM (now green like a fresh cannabis stem) === */}
       <mesh position={[0, -pheno.elongation - 0.35, 0]}>
         <cylinderGeometry args={[0.05, 0.065, 0.5, 12]} />
-        <meshStandardMaterial color="#5a4225" roughness={0.88} metalness={0.05} />
+        <meshStandardMaterial color="#3a4d28" roughness={0.78} metalness={0.08} />
       </mesh>
       <mesh position={[0, -pheno.elongation - 0.05, 0]}>
         <sphereGeometry args={[0.1, 14, 10]} />
-        <meshStandardMaterial color="#7b5e35" roughness={0.8} />
+        <meshStandardMaterial color="#4d6b35" roughness={0.72} metalness={0.05} />
       </mesh>
 
-      {/* === INNER BUD CORE (hides gaps, shadow layer) === */}
+      {/* === SIDE BRANCH STEMS (green, smaller) === */}
+      {branchStemMeshes.map((b) => (
+        <mesh key={`branch-${b.key}`} position={b.position} rotation={b.rotation}>
+          <cylinderGeometry args={[b.thickness * 0.85, b.thickness, b.length, 8]} />
+          <meshStandardMaterial color="#3d5028" roughness={0.8} metalness={0.06} />
+        </mesh>
+      ))}
+
+      {/* === INNER BUD CORE === */}
       <mesh geometry={core}>
         <meshStandardMaterial vertexColors roughness={0.7} metalness={0.02} />
       </mesh>
 
-      {/* === CALYX CLUSTER (the actual visible "popcorn" structure) === */}
+      {/* === CALYX CLUSTER === */}
       {calyces.map((c, i) => (
         <mesh
           key={`calyx-${i}`}
@@ -1049,7 +1238,7 @@ function Bud({ strain }: { strain: Strain }) {
         </mesh>
       ))}
 
-      {/* === SUGAR LEAVES === */}
+      {/* === SUGAR LEAVES (small, embedded) === */}
       {features.leaves.map((l, i) => (
         <mesh
           key={`leaf-${i}`}
@@ -1069,7 +1258,31 @@ function Bud({ strain }: { strain: Strain }) {
         </mesh>
       ))}
 
-      {/* === CURVED PISTILS (merged TubeGeometry or cone fallback) === */}
+      {/* === TRIM LEAVES (longer, untrimmed look — protrude between calyces) === */}
+      {features.trimLeaves.map((l, i) => (
+        <mesh
+          key={`trim-${i}`}
+          position={l.position}
+          rotation={l.rotation}
+          scale={[l.scale, l.scale, l.scale]}
+        >
+          <shapeGeometry args={[trimLeafShape]} />
+          <meshPhysicalMaterial
+            color={pheno.baseGreen.clone().multiplyScalar(1.05).offsetHSL(
+              (pseudoRandom(i + pheno.seed) - 0.5) * 0.04,
+              0,
+              (pseudoRandom(i + pheno.seed * 2) - 0.5) * 0.1
+            )}
+            roughness={0.5}
+            metalness={0.03}
+            clearcoat={0.5}
+            clearcoatRoughness={0.45}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      ))}
+
+      {/* === CURVED PISTILS === */}
       {features.mergedPistilGeometry ? (
         <mesh geometry={features.mergedPistilGeometry}>
           <meshStandardMaterial vertexColors roughness={0.65} metalness={0.0} />
