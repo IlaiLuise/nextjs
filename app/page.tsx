@@ -443,15 +443,15 @@ function getPhenotype(strain: Strain): Phenotype {
     taper: isSativa ? 0.28 + r(2) * 0.08 : 0.16 + r(2) * 0.08,
     bumpStrength: 1.1 + r(4) * 0.4,
     asymmetry: 0.08 + r(5) * 0.1,
-    pistilCount: Math.floor(55 + r(6) * 30),
-    pistilLength: 0.22 + r(7) * 0.18,
+    pistilCount: Math.floor(80 + r(6) * 40),
+    pistilLength: 0.28 + r(7) * 0.2,
     pistilThickness: 0.005 + r(8) * 0.003,
     pistilWhiteRatio: isOrange ? 0.05 + r(9) * 0.1 : 0.15 + r(9) * 0.2,
     pistilHue: 0.045 + r(10) * 0.05,
     pistilCurve: 0.55 + r(11) * 0.45,
-    trichomeCount: isWhite ? Math.floor(420 + r(12) * 150) : Math.floor(300 + r(12) * 120),
-    trichomeSize: 0.014 + r(13) * 0.006,
-    trichomeGlow: isWhite ? 0.85 + r(14) * 0.3 : 0.6 + r(14) * 0.3,
+    trichomeCount: isWhite ? Math.floor(680 + r(12) * 180) : Math.floor(480 + r(12) * 180),
+    trichomeSize: 0.017 + r(13) * 0.007,
+    trichomeGlow: isWhite ? 0.9 + r(14) * 0.3 : 0.7 + r(14) * 0.3,
     baseGreen,
     darkGreen,
     bumpHighlight,
@@ -521,10 +521,13 @@ function buildInnerBudCore(pheno: Phenotype): THREE.BufferGeometry {
     positions.setY(i, y * scale);
     positions.setZ(i, z * scale);
 
-    // VERY dark — this is the shadow that shows between calyces
+    // Dark shadow color with FBM-modulated variation (some spots lighter for depth)
     const c = pheno.darkGreen.clone();
     const variation = pseudoRandom(i * 3.456 + pheno.seed);
-    c.multiplyScalar(0.32 + variation * 0.22);
+    // FBM modulation: large-scale patches of slightly lighter areas
+    const depthMod = fbm(x * 2.5, y * 2, z * 2.5, pheno.seed + 500, 2);
+    const lightnessFactor = 0.32 + variation * 0.22 + Math.max(0, depthMod) * 0.4;
+    c.multiplyScalar(lightnessFactor);
     colors.push(c.r, c.g, c.b);
   }
 
@@ -573,11 +576,12 @@ function buildCalyxGeometry(seed: number, tintColor: THREE.Color): THREE.BufferG
       z *= widen;
     }
 
-    // Surface noise — slightly stronger for organic, pebble-like look
+    // Surface noise — stronger to break up faceted silhouettes
     const angle = Math.atan2(z, x);
-    const noise = Math.sin(angle * 5 + y * 3 + seed) * 0.045
-                + Math.cos(angle * 7 - y * 5 + seed * 2) * 0.028
-                + (pseudoRandom(seed + i * 7.3) - 0.5) * 0.035;
+    const noise = Math.sin(angle * 5 + y * 3 + seed) * 0.055
+                + Math.cos(angle * 7 - y * 5 + seed * 2) * 0.038
+                + Math.sin(angle * 11 + y * 9 + seed * 3) * 0.022
+                + (pseudoRandom(seed + i * 7.3) - 0.5) * 0.045;
 
     const dist = Math.max(0.0001, Math.sqrt(x * x + y * y + z * z));
     const scale = (dist + noise) / dist;
@@ -624,22 +628,35 @@ function buildCalyxCluster(pheno: Phenotype): CalyxClusterResult {
   const halfHeight = pheno.elongation;
   const maxRadius = isIndica ? 0.92 : isSativa ? 0.6 : 0.78;
 
+  // Fat-side angle (one side of bud is slightly larger — organic asymmetry)
+  const fatSideAngle = pseudoRandom(pheno.seed + 200) * Math.PI * 2;
+  const fatSideStrength = 0.08 + pseudoRandom(pheno.seed + 201) * 0.08;
+
   // === MAIN LAYERED INTERNODE STRUCTURE ===
   for (let layerIdx = 0; layerIdx < numLayers; layerIdx++) {
     const layerT = 0.05 + (layerIdx / Math.max(1, numLayers - 1)) * 0.88;
 
     const widthFactor = budShapeRadiusAt(layerT, pheno);
     const radiusAtY = widthFactor * maxRadius;
-    const yPos = (layerT * 2 - 1) * halfHeight;
+    // Layer y-jitter for organic non-uniform stacking
+    const yJitter = (pseudoRandom(pheno.seed + layerIdx * 17 + 500) - 0.5) * 0.08;
+    const yPos = (layerT * 2 - 1) * halfHeight + yJitter;
 
-    const layerCalyxCount = Math.max(4, Math.floor(5 + widthFactor * 7));
+    // Per-layer calyx count with random variation (±1-2)
+    const baseLayerCount = Math.max(4, Math.floor(5 + widthFactor * 7));
+    const layerCalyxCount = Math.max(3, baseLayerCount + Math.floor((pseudoRandom(pheno.seed + layerIdx * 31) - 0.5) * 3));
     const layerRotation = layerIdx * 0.73 + pseudoRandom(pheno.seed + layerIdx) * 0.5;
 
     for (let i = 0; i < layerCalyxCount; i++) {
       const s = pheno.seed + layerIdx * 1000 + i * 7.31;
       const baseAngle = (i / layerCalyxCount) * Math.PI * 2 + layerRotation;
       const angle = baseAngle + (pseudoRandom(s) - 0.5) * 0.35;
-      const radiusVar = 1 + (pseudoRandom(s + 1) - 0.5) * 0.13;
+
+      // Fat-side bonus: calyces near the fat-side angle get extra radius
+      const angleDiff = Math.abs(((angle - fatSideAngle + Math.PI) % (Math.PI * 2)) - Math.PI);
+      const fatBonus = Math.max(0, 1 - angleDiff / 1.2) * fatSideStrength;
+
+      const radiusVar = 1 + (pseudoRandom(s + 1) - 0.5) * 0.13 + fatBonus;
       const x = Math.cos(angle) * radiusAtY * radiusVar;
       const z = Math.sin(angle) * radiusAtY * radiusVar;
       const calyxY = yPos + (pseudoRandom(s + 2) - 0.5) * 0.12;
@@ -883,9 +900,8 @@ function generateBudFeatures(pheno: Phenotype, calyces: CalyxData[]): BudFeature
   const trichomeHeads: InstanceData[] = [];
   const leaves: LeafData[] = [];
 
-  // === PISTILS: emerging from top half of cluster ===
-  // Allow calyces from clusterY > 0.1 (top half) to spawn pistils
-  const upperCalyces = calyces.filter((c) => c.clusterY > 0.1);
+  // === PISTILS: emerging from upper 2/3 of cluster (more coverage) ===
+  const upperCalyces = calyces.filter((c) => c.clusterY > -0.1);
   const pistilSampleCount = Math.min(pheno.pistilCount, upperCalyces.length * 5);
 
   for (let i = 0; i < pistilSampleCount; i++) {
@@ -1021,6 +1037,33 @@ function generateBudFeatures(pheno: Phenotype, calyces: CalyxData[]): BudFeature
         scale: [headSize, headSize * 1.4, headSize],
       });
     }
+
+    // MICRO trichomes — tiny head capsules with no stalk, gives powdery "puderzucker" coating
+    const microCount = Math.floor(trichomesPerCalyx * 1.4);
+    for (let i = 0; i < microCount; i++) {
+      const s = pheno.seed + cIdx * 1000 + i * 1.7321 + 60000;
+      const theta = pseudoRandom(s) * Math.PI * 2;
+      const cosPhi = pseudoRandom(s + 1) * 1.8 - 0.8;
+      const phi = Math.acos(Math.max(-1, Math.min(1, cosPhi)));
+      const localX = Math.sin(phi) * Math.cos(theta);
+      const localY = Math.cos(phi);
+      const localZ = Math.sin(phi) * Math.sin(theta);
+      const localSurface = new THREE.Vector3(localX * 1.02, localY * 1.32, localZ * 1.02);
+      const worldSurface = localSurface.clone().applyMatrix4(calyx.transformMatrix);
+      const worldNormal = localSurface.clone().normalize()
+        .applyMatrix3(new THREE.Matrix3().setFromMatrix4(calyx.transformMatrix))
+        .normalize();
+      const microSize = pheno.trichomeSize * (0.35 + pseudoRandom(s + 2) * 0.3);
+      trichomeHeads.push({
+        position: [
+          worldSurface.x + worldNormal.x * microSize * 0.4,
+          worldSurface.y + worldNormal.y * microSize * 0.4,
+          worldSurface.z + worldNormal.z * microSize * 0.4,
+        ],
+        rotation: rotationFromDir(worldNormal),
+        scale: [microSize, microSize * 0.9, microSize],
+      });
+    }
   }
 
   // === SUGAR LEAVES: small leaves embedded between calyces in mid-cluster ===
@@ -1117,7 +1160,7 @@ function generateTrimLeaves(pheno: Phenotype, calyces: CalyxData[]): LeafData[] 
     const rotMat = new THREE.Matrix4().makeBasis(finalX, finalY, finalRadial);
     const euler = new THREE.Euler().setFromRotationMatrix(rotMat);
 
-    const scale = 0.3 + pseudoRandom(sl + 7) * 0.28; // 0.3-0.58, larger than sugar leaves
+    const scale = 0.42 + pseudoRandom(sl + 7) * 0.36; // 0.42-0.78, deutlich grösser
 
     trimLeaves.push({
       position: [worldBase.x, worldBase.y, worldBase.z],
@@ -1238,49 +1281,66 @@ function Bud({ strain }: { strain: Strain }) {
         </mesh>
       ))}
 
-      {/* === SUGAR LEAVES (small, embedded) === */}
-      {features.leaves.map((l, i) => (
-        <mesh
-          key={`leaf-${i}`}
-          position={l.position}
-          rotation={l.rotation}
-          scale={[l.scale, l.scale, l.scale]}
-        >
-          <shapeGeometry args={[leafShape]} />
-          <meshPhysicalMaterial
-            color={pheno.baseGreen.clone().multiplyScalar(1.2)}
-            roughness={0.55}
-            metalness={0.03}
-            clearcoat={0.4}
-            clearcoatRoughness={0.5}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      ))}
+      {/* === SUGAR LEAVES (small, embedded, frosted) === */}
+      {features.leaves.map((l, i) => {
+        const leafColor = pheno.baseGreen.clone()
+          .multiplyScalar(1.35)
+          .lerp(new THREE.Color("#e8e4c4"), 0.18); // slight frosty white tint
+        return (
+          <mesh
+            key={`leaf-${i}`}
+            position={l.position}
+            rotation={l.rotation}
+            scale={[l.scale, l.scale, l.scale]}
+          >
+            <shapeGeometry args={[leafShape]} />
+            <meshPhysicalMaterial
+              color={leafColor}
+              roughness={0.45}
+              metalness={0.08}
+              clearcoat={0.55}
+              clearcoatRoughness={0.4}
+              emissive="#fff8d0"
+              emissiveIntensity={0.12}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        );
+      })}
 
       {/* === TRIM LEAVES (longer, untrimmed look — protrude between calyces) === */}
-      {features.trimLeaves.map((l, i) => (
-        <mesh
-          key={`trim-${i}`}
-          position={l.position}
-          rotation={l.rotation}
-          scale={[l.scale, l.scale, l.scale]}
-        >
-          <shapeGeometry args={[trimLeafShape]} />
-          <meshPhysicalMaterial
-            color={pheno.baseGreen.clone().multiplyScalar(1.05).offsetHSL(
-              (pseudoRandom(i + pheno.seed) - 0.5) * 0.04,
-              0,
-              (pseudoRandom(i + pheno.seed * 2) - 0.5) * 0.1
-            )}
-            roughness={0.5}
-            metalness={0.03}
-            clearcoat={0.5}
-            clearcoatRoughness={0.45}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      ))}
+      {features.trimLeaves.map((l, i) => {
+        const trimColor = pheno.baseGreen.clone()
+          .multiplyScalar(1.15)
+          .offsetHSL(
+            (pseudoRandom(i + pheno.seed + 30000) - 0.5) * 0.05,
+            -0.05, // slightly desaturated
+            (pseudoRandom(i + pheno.seed * 2 + 30001) - 0.5) * 0.12
+          );
+        // Some trim leaves are heavily frosted (~30% chance)
+        const isHeavyFrosted = pseudoRandom(i + pheno.seed + 30002) > 0.7;
+        if (isHeavyFrosted) trimColor.lerp(new THREE.Color("#e8e4c4"), 0.28);
+        return (
+          <mesh
+            key={`trim-${i}`}
+            position={l.position}
+            rotation={l.rotation}
+            scale={[l.scale, l.scale, l.scale]}
+          >
+            <shapeGeometry args={[trimLeafShape]} />
+            <meshPhysicalMaterial
+              color={trimColor}
+              roughness={0.5}
+              metalness={0.05}
+              clearcoat={0.5}
+              clearcoatRoughness={0.45}
+              emissive="#fff8d0"
+              emissiveIntensity={isHeavyFrosted ? 0.18 : 0.06}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        );
+      })}
 
       {/* === CURVED PISTILS === */}
       {features.mergedPistilGeometry ? (
@@ -1305,7 +1365,7 @@ function Bud({ strain }: { strain: Strain }) {
 
       {/* === TRICHOME STALKS === */}
       {features.trichomeStalks.length > 0 && (
-        <Instances limit={Math.max(700, features.trichomeStalks.length)} range={features.trichomeStalks.length}>
+        <Instances limit={Math.max(900, features.trichomeStalks.length)} range={features.trichomeStalks.length}>
           <coneGeometry args={[1, 1, 5]} />
           <meshStandardMaterial
             color="#f4ecc8"
@@ -1320,18 +1380,18 @@ function Bud({ strain }: { strain: Strain }) {
         </Instances>
       )}
 
-      {/* === TRICHOME HEADS — bright polished resin look === */}
+      {/* === TRICHOME HEADS — bright sparkling resin look === */}
       {features.trichomeHeads.length > 0 && (
-        <Instances limit={Math.max(700, features.trichomeHeads.length)} range={features.trichomeHeads.length}>
-          <capsuleGeometry args={[1, 1.0, 3, 5]} />
+        <Instances limit={Math.max(1500, features.trichomeHeads.length)} range={features.trichomeHeads.length}>
+          <capsuleGeometry args={[1, 1.0, 3, 6]} />
           <meshPhysicalMaterial
-            color="#fffaea"
-            roughness={0.03}
-            metalness={0.9}
+            color="#ffffff"
+            roughness={0.02}
+            metalness={0.95}
             clearcoat={1.0}
-            clearcoatRoughness={0.05}
-            emissive="#fff8d0"
-            emissiveIntensity={pheno.trichomeGlow * 0.9}
+            clearcoatRoughness={0.03}
+            emissive="#fff8e0"
+            emissiveIntensity={pheno.trichomeGlow * 1.1}
           />
           {features.trichomeHeads.map((t, i) => (
             <Instance key={i} position={t.position} rotation={t.rotation} scale={t.scale} />
@@ -1368,16 +1428,18 @@ function BudViewer({ strain }: { strain: Strain }) {
     >
       <Suspense fallback={null}>
         <Environment preset="forest" background={false} />
-        {/* Strong key light from upper right — main sunlight */}
-        <directionalLight position={[5, 8, 5]} intensity={2.1} color="#fff6e3" castShadow />
-        {/* Reduced fill from cool sky direction — preserves shadow depth */}
-        <directionalLight position={[-5, 4, -3]} intensity={0.55} color="#a8c4ff" />
-        {/* Rim light from below — makes trichomes glow */}
-        <directionalLight position={[0, -2, 4]} intensity={0.65} color="#ffd9a8" />
-        <pointLight position={[3, 4, 2]} intensity={0.5} color="#ffffff" distance={12} />
-        <pointLight position={[-2, 2, 3]} intensity={0.25} color="#e8f0ff" distance={10} />
-        <ambientLight intensity={0.22} />
-        <Float speed={1.2} rotationIntensity={0.25} floatIntensity={0.2}>
+        {/* Strong warm key light — primary sunlight */}
+        <directionalLight position={[5, 8, 5]} intensity={2.2} color="#fff6e3" castShadow />
+        {/* Cool fill from upper opposite — sky color */}
+        <directionalLight position={[-5, 4, -3]} intensity={0.5} color="#b4cdff" />
+        {/* Strong rim light from low-front — backlights trichomes for sparkle */}
+        <directionalLight position={[0, -1.5, 4]} intensity={0.85} color="#ffdfb2" />
+        {/* Extra rim from upper-back — makes top trichomes glow */}
+        <directionalLight position={[2, 6, -3]} intensity={0.6} color="#ffe8c4" />
+        <pointLight position={[3, 4, 2]} intensity={0.45} color="#ffffff" distance={12} />
+        <pointLight position={[-2, 2, 3]} intensity={0.22} color="#e8f0ff" distance={10} />
+        <ambientLight intensity={0.2} color="#c8d8c0" />
+        <Float speed={1.2} rotationIntensity={0.22} floatIntensity={0.18}>
           <Bud strain={strain} />
         </Float>
         <ContactShadows position={[0, -1.8, 0]} opacity={0.6} blur={2.8} far={3} scale={4} color="#000000" />
